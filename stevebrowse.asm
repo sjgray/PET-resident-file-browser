@@ -573,7 +573,7 @@ ShowDirectory:	LDA DDEV			; Check if drive selected
 
 ShowIsOff:	LDX DROW
 		LDA DCOL
-		LDY #18				; "No Dir loaded"
+		LDY #7				; "No Dir loaded"
 		JSR PrintAtNM			; Print it and end
 		LDX DROW
 		INX
@@ -969,8 +969,10 @@ IncZP1X:	RTS
 ; STREND  pointer is the End of Array pointer which is the first address that is free
 ; FREETOP pointer is the End of RAM and is the last address we can use.
 ; All Buffers start on PAGE boundries to reduce code size.
+; STREND  ($2E) String End
+; FREETOP ($30) Top of Memory
 ;
-; ** Testing phase - ignore FREETOP, max 255 entries which uses ~6K for directory.
+; ** Max 255 entries which uses ~6K for directory.
 ; ** Buffers with no BASIC program loaded: LEFT  at $0D00, RIGHT at $2500
 ; ** Test on VICE with 8032 Model.
 ;
@@ -1007,6 +1009,25 @@ InitDirMem:	LDX STREND+1			; HI End of Arrays
 		STA LDMEMHI			; HI LEFT Directory Buffer
 		ADC #24				; Reserve 24 pages (6K) for LEFT Dir
 		STA RDMEMHI			; HI RIGHT Directory Buffer
+		ADC #24				; Reserve 24 more for RIGHT dir
+		CMP FRETOP+1			; Is it above max memory?
+		BMI WillFit
+
+WontFit:	LDY #18				; basic program too large. clear?
+		JSR PrintNM			; print it
+		JSR AskSure			; are you sure prompt
+		CMP #89				; "Y"?
+		BNE AbortMem
+
+EraseProgram:	LDA #0				; Erase first line link
+		STA $0401			; line link
+		STA $0402			; line link
+		LDA #3				; $0403 reset end of array pointer
+		LDY #4
+		STA STREND			; Store to end of array pointer
+		STY STREND+1
+		JMP InitDirMem			; go back up and re-do memory allocation
+
 
 ;-------------- Set up Default LEFT (Active) Directory
 ;
@@ -1014,7 +1035,7 @@ InitDirMem:	LDX STREND+1			; HI End of Arrays
 ; Since the Active directory defaults to the LEFT when we switch to the RIGHT these
 ; will be copied to the LEFT storage area
 
-		LDA #8	;$FA			; Last device accessed
+WillFit:	LDA #8	;$FA			; Last device accessed
 		STA DDEV			; LEFT  Device#
 		LDA #DIRROW0			; Set up LEFT ROW,COL for Listing
 		STA DROW			; LEFT Row
@@ -1032,6 +1053,13 @@ InitDirMem:	LDX STREND+1			; HI End of Arrays
 		LDA #DIRCOL1
 		STA RDCOL
 		RTS
+
+;-------------- Abort due to low memory
+
+AbortMem:
+		PLA				; Pull return address from stack
+		PLA
+		RTS				; RTS should exit program
 
 
 ;======================================================================================
@@ -1072,8 +1100,10 @@ SetDZX:		RTS
 
 AskQuit:	LDY #4					; "Quit?"
 		JSR ClearKeyNM				; Clear KEY Row, Print the Message
+
 AskSure:	LDY #5					; "Are you sure"
 		JSR PrintNM				; Print the Message
+
 AnyKey:		JSR GETIN				; Get keystroke to .A
 		BEQ AnyKey				; None, so loop back
 		RTS
@@ -1325,7 +1355,7 @@ NMAdHi:	!BYTE >NM0,>NM1,>NM2,>NM3,>NM4,>NM5,>NM6,>NM7		; 0-7
 
 NM0:	!BYTE 0						; For print@ 
 NM1:	!BYTE 19,19,147,17,0				; <HOME><HOME><CLS><DOWN>
-NM2:	!PET "stevebrowse 2021-04-20",0 		; Title text
+NM2:	!PET "stevebrowse 2021-04-21",0 		; Title text
 
 NM3:	!PET RVS,"/"	,ROFF,"drive "			; Select Drive	
 	!PET RVS,"home" ,ROFF,"top "			; Home
@@ -1348,7 +1378,7 @@ NM14:	!PET "renaming...",13,0				; Rename...
 NM15:   !PET "dev:xx unit:x ",0				; Device# and Unit# display
 NM16:	!PET "hit '/' to select!",0			;
 NM17:	!PET "ds: ",0					; Disk Status
-NM18:	!PET "x",0					; unused
+NM18:	!PET 146,"not enough memory. erase basic program?",13,0	; no space for dir
 NM19:	!PET "                     ",0			; Blank dir entry
 
 NM20:	!PET "device# ("				; Device selection prompt
