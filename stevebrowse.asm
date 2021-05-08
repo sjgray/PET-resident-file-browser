@@ -36,6 +36,8 @@ MYDRIVE		= 8				; Default Drive Number, ie: 8
 DRIVEUNIT	= 0				; Default Unit Numberm ie: 0 or 1
 DRECLEN		= 23				; Record length for ram directory
 
+DEBUGRAM	= SCREEN_RAM+21*80		; Address  of Debug       ROW
+
 DSROW		= 22				; Location of Disk Status ROW
 MSGROW		= 23				; Location of Info Status ROW
 HELPROW		= 24				; Location of HELP keys   ROW
@@ -163,12 +165,12 @@ BrowseDone:	RTS
 ; keystrokes and acts on them, looping around until user exits.
 
 Interact:
-		INC SCREEN_RAM+30		; DEBUG!!!!!!!!!!!!!!!!!!!!!
+		INC DEBUGRAM			; DEBUG!!!!!!!!!!!!!!!!!!!!!
 
 		JSR GETIN			; Get keystroke to .A
 		BEQ Interact			; No press, go back
 
-		STA SCREEN_RAM + 32		; DEBUG!!!!!!!!!!!!!!!!!!
+		STA DEBUGRAM + 1		; DEBUG!!!!!!!!!!!!!!!!!!
 
 		CMP #88				; Is it <X>?
 		BEQ IsExit			; Yes, Exit!
@@ -189,7 +191,6 @@ Interact:
 
 IRefresh:	JSR ShowDirectory		; Re-draw Directory
 ILoop:		JMP Interact			; Loop back for more
-		
 
 IsExit:		RTS				; Exit!
 
@@ -206,7 +207,6 @@ YesTop:		LDY DTOP			; Get TOP
 
 		DEC DTOP			; Move TOP Up
 		DEC DSEL			; Move SELECTED Up
-		JSR DScrollDOWN			; Do Scroll DOWN
 NoUp:		JMP IRefresh			; Refresh
 		
 
@@ -216,7 +216,7 @@ IsDown:		LDY DSEL			; SELECTED entry
 		CPY DEND			; Is is at the END?
 		BEQ ILoop			; Yes, can't go down. abort.
 
-		INC SCREEN_RAM+120		; DEBUG
+		INC DEBUGRAM+2			; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 		CPY DBOT			; Is it at BOTTOM
 		BEQ IsDownOK			; Yes, need to scroll
@@ -225,7 +225,6 @@ IsDown:		LDY DSEL			; SELECTED entry
 
 IsDownOK	INC DSEL			; Move SELECTED down
 		INC DTOP
-		JSR DScrollUP			; Do Scroll UP
 		JMP IRefresh
 
 ;-------------- Perform HOME
@@ -234,7 +233,6 @@ IsHome:		LDY #0				; First Entry
 		STY DTOP			; Set TOP
 		INY
 		STY DSEL			; Set SELECTED
-		JSR DScrollTOP			; Scroll to TOP
 		JSR DrawUI
 		JMP IRefresh
 
@@ -253,69 +251,57 @@ IsSpaceX:	TXA
 		STA (SELMEM),Y			; Write <BACKARROW> to entry
 		JMP IRefresh
 
-IsPgDn:		LDA ZP3				; LO Work Pointer
-		CLC
-		ADC #$CC			; DRECLEN*DIRHEIGHT=460= $1CC
-		STA ZP3
-		LDA ZP3+1			; HI Work Pointer
-		ADC #1
-		STA ZP3+1			; HI Work Pointer
-; todo: check for past END!
-		LDA DTOP
-		ADC #DIRHEIGHT
-		STA DTOP			; Directory TOP
-		STA DSEL			; SELECTED entry
-		JMP IRefresh
+;-------------- Perform Page DOWN
 
-IsPgUp:
+IsPgDn:		CLC
+		LDA DTOP			; Directory TOP
+		ADC #DIRHEIGHT			; Add height of display box
+		CMP #DEND			; Does it go past END?
+		BMI ILoop			; Yes, abort!
+		STA DTOP			; No, so set DTOP
+		JMP IRefresh			; Re-draw list
+
+;-------------- Perform Page UP
+
+IsPgUp:		CLC
+		LDA DTOP			; Directory TOP
+		CMP #DIRHEIGHT			; Height of display box
+		BPL IPUfull			; Is it more? Yes, jump full page
+		LDA #0				; No, just go to FIRST entry
+		STA DTOP
+		JMP IRefresh
+IPUfull		SBC #DIRHEIGHT			; Subtract height of display box
+		STA DTOP			; Set DTOP
+		JMP IRefresh			; Re-draw list
 		
 ;-------------- We are lost
 
 		JMP IRefresh
 
-;-------------- Directory Scrolling
-; Takes the current DTOPMEM pointer and loads into ZP3 pointer.
-; Scrolling up or down adds or subtracts DRECLEN constant to update ZP3.
+;======================================================================================
+; SetDZ: Set ZP3 Pointer Calculaion using DTOP
+;======================================================================================
+; DTOP is the INDEX to the top of the visible directory list. All display is relative
+; to this point. Rather than fiddle with adding or subtacting as you move up or down
+; the listing we will just re-calculate the ZP3 pointer each time.
+; DTOP is limited to one byte, so 256 maximum entries.
 
-DScrollUP:	JSR DTOP2ZP3			; Load the Work Pointers
-		ADC #DRECLEN			; Subtract entry length
-		STA ZP3				; Store it
-		STA DTOPMEM
-		BCC DScrollX			; Did it cross the page?
-		INC ZP3+1			; Page cross
-		INC DTOPMEM+1
-		RTS
-
-DScrollDOWN:	JSR DTOP2ZP3			; Load the Work Pointers
-		SBC #DRECLEN			; Add entry length
-		STA ZP3				; Store it		
-		STA DTOPMEM			
-		BCC DScrollX			; Did it cross the page?
-		INC ZP3+1
-		INC DTOPMEM+1
-		RTS
-
-;-------------- 
-DScrollTOP:	LDY DMEM			; LO DMEM points to start
-		INY
-		INY
-		STY DTOPMEM			; LO Work Pointer
-		STY ZP3
-
-		LDA DMEM+1			; HI
-		STA DTOPMEM+1			; HI
-		STA ZP3+1
-		RTS 
-
-;-------------- Load the DTOPMEM pointer and copy to ZP3
-
-DTOP2ZP3:	LDA DTOPMEM+1			; HI DTOP Memory Address
-		STA ZP3+1			; HI Store in Work Pointer
-		LDA DTOPMEM			; LO DTOP Memory Address
-		STA ZP3				; LO Store in Work Pointer
-		CLC				; Prep for Add or Subtract
-DScrollX	RTS				; Return with LO in .A
-
+SetDZ:		LDY DTOP			; Directory TOP. Counter for add loop
+		LDA DMEM+1			; HI DMEM 
+		STA ZP3+1			; HI Work Pointer
+		LDA #2				; LO DMEM = $00 + 2
+		STA ZP3				; LO Work Pointer
+SetDZloop:	CPY #0				; Are we at top?
+		BEQ SetDZX			; Yes, done
+		CLC
+		ADC #DRECLEN			; Directory Record Length 
+		STA ZP3				; LO Work Pointer
+		BCC SDZskip			; no page crossing
+		INC ZP3+1			; HI Work Pointer
+SDZskip:	DEY				; 
+		BNE SetDZloop			; Loop back
+SetDZX:		RTS
+		
 ;======================================================================================
 ; Init Stuff
 ;======================================================================================
@@ -353,14 +339,14 @@ InitStuff:	LDX #0				; Make our data start on page boundry
 
 ShowLeftDir:	LDY LDIRMEM			; LO Pointer to LEFT Directory Buffer
 		LDA LDIRMEM+1			; HI Pointer to LEFT Directory Buffer
-		JSR SetDirMem			; Set Memory Pointers
+;		JSR SetDirMem			; Set Memory Pointers
 		LDA #DIRCOL0			; LEFT directory column
 		LDY LDIREND			; Index of LEFT last entry
 		JMP ShowTest
 
 ShowRightDir:	LDY RDIRMEM			; LO Pointer to LEFT Directory Buffer
 		LDA RDIRMEM+1			; HI Pointer to LEFT Directory Buffer
-		JSR SetDirMem			; Set Memory Pointers
+;		JSR SetDirMem			; Set Memory Pointers
 		LDA #DIRCOL1			; LEFT directory column
 		LDY RDIREND			; Index of LEFT last entry
 
@@ -370,30 +356,30 @@ ShowTest:	STA DCOL			; Directory Column
 		BNE ShowDirectory		; No, good to go
 		RTS				; Yes, nothing to show!
 
-SetDirMem:	STY DMEM			; LO Pointer for Dir Memory
-		INY				; Add 2 to skip block bytes
-		INY
-		STY DTOPMEM			; LO Top Index Memory Pointer
-		STY ZP3				; LO Work Pointer
-
-		STA DMEM+1			; HI Pointer for Dir Memory
-		STA DTOPMEM+1			; HI Top Index Memory Pointer
-		STA ZP3+1			; HI Work Pointer
-		RTS
+;SetDirMem:	STY DMEM			; LO Pointer for Dir Memory
+;		INY				; Add 2 to skip block bytes
+;		INY
+;		STY DTOPMEM			; LO Top Index Memory Pointer
+;		STY ZP3				; LO Work Pointer
+;
+;		STA DMEM+1			; HI Pointer for Dir Memory
+;		STA DTOPMEM+1			; HI Top Index Memory Pointer
+;		STA ZP3+1			; HI Work Pointer
+;		RTS
 
 DIRDEBUG:	LDY DTOPMEM
-		STY SCREEN_RAM+40
+		STY DEBUGRAM+4
 		LDY DTOPMEM+1
-		STY SCREEN_RAM+41
+		STY DEBUGRAM+5
 
 		LDY DTOP
-		STY SCREEN_RAM+43
+		STY DEBUGRAM+7
 		LDY DSEL
-		STY SCREEN_RAM+44
+		STY DEBUGRAM+8
 		LDY DBOT
-		STY SCREEN_RAM+45
+		STY DEBUGRAM+9
 		LDY DEND
-		STY SCREEN_RAM+46
+		STY DEBUGRAM+10
 		RTS
 
 ;======================================================================================
@@ -406,11 +392,14 @@ DIRDEBUG:	LDY DTOPMEM
 ; DSEL is the currently selected entry - it must be marked (somehow!!!!!)
 
 ShowDirectory:
+		JSR SetDZ			; Set ZP3 pointer based on DTOP
 		JSR DIRDEBUG
-		LDY DTOPMEM			; LO DTOP Memory Address
-		STY ZP3				; LO Work Pointer
-		LDY DTOPMEM+1			; HI DTOP Memory Address
-		STY ZP3+1			; HI Work Pointer
+
+;		LDY DTOPMEM			; LO DTOP Memory Address
+;		STY ZP3				; LO Work Pointer
+;		LDY DTOPMEM+1			; HI DTOP Memory Address
+;		STY ZP3+1			; HI Work Pointer
+
 		LDY DTOP			; Top Entry
 		STY DENTRY			; Make it Current Entry
 
@@ -438,10 +427,8 @@ SDSelection:
 ;-------------- Selected Item - Save Pointer
 		LDA ZP3				; Save pointer to SELECTED
 		STA SELMEM			; LO SELECTED memory pointer
-		STA SCREEN_RAM+ 36		; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!
 		LDA ZP3+1			; HI Work Pointer
 		STA SELMEM+1			; HI SELECTED memory pointer
-		STA SCREEN_RAM+ 37		; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 		LDA #62				; Yes, use ">" character
 SDpoint:	JSR $FFD2			; Print It!
@@ -517,12 +504,12 @@ CursorAt:	STA CursorRow				; Set ROW
 		JSR SetCursor				; Position Cursor
 		RTS
 
-SetMsg:	PHA					; Save .A and .Y
+SetMsg:		PHA					; Save .A and .Y
 		TYA					; onto stack
 		PHA
 		JSR ClearMsg				; Clear the Status Line
-		LDA #MSGROW				;
-		LDY #0
+		LDA #MSGROW				; Message ROW
+		LDY #0					; Column=0
 		JSR CursorAt				; Position cursor
 		PLA					; Bring back pointer to string
 		TAY
@@ -531,13 +518,13 @@ SetMsg:	PHA					; Save .A and .Y
 
 ClearMsg:	LDA #MSGROW				; Message ROW
 ClearRow:	LDY #32					; <SPACE>
-FillRow:	JSR CursorAt
+FillRow:	JSR CursorAt				; Set the cursor
 		LDA CursorCol				; Put CHR to A
-		LDY #0					; Counter
-ClearRloop	STA (ScrPtr),Y
-		INY
-		CPY SCNWID
-		BNE ClearRloop
+		LDY #0					; Start Counter at cursor pos
+ClearRloop	STA (ScrPtr),Y				; Write character to screen
+		INY					; Next position
+		CPY SCNWID				; Is it end of line?
+		BNE ClearRloop				; No, go back for more
 		RTS
 
 ;======================================================================================
@@ -974,11 +961,12 @@ DrawUI:		JSR $E015			; Clear Screen
 ProgInfo:	!BYTE MSGROW-1,0				; Message ROW
 		!PET  "stevebrowse 2021-04-11",0 		; Title text
 KeyBar:		!BYTE HELPROW,0					; HELP ROW
-		!PET  RVS,"crsr",  ROFF,"sel "			; cursor
-		!PET  RVS,"home",  ROFF,"top "			; home
-		!PET  RVS,"space",  ROFF,"mark "		; space
-		!PET  RVS,"return",ROFF,"run/cd "		; return		
-		!BYTE RVS,94,      ROFF				; UPARROW
+		!PET  RVS,"crsr",  ROFF,"sel "			; Cursor
+		!PET  RVS,"home",  ROFF,"top "			; Home
+		!PET  RVS,"<>",    ROFF,"page "			; Page Up/Down
+		!PET  RVS,"space",  ROFF,"mark "		; Space
+		!PET  RVS,"return",ROFF,"run/cd "		; Return		
+		!BYTE RVS,94,      ROFF				; UpArrow
 		!PET  "root",0					; 
 
 ;-------------- 
