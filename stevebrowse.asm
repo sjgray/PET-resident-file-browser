@@ -29,7 +29,7 @@ DIRWIDTH        = 16				; Width of directory window
 DIRHEIGHT	= 20				; Height of directory window
 DIRROW		= 0				; Row for first directory line
 DIRCOL0		= 0				; Column for LEFT directory
-DIRCOL1		= 39				; Column for LEFT directory
+DIRCOL1		= 26				; Column for LEFT directory
 IDFLAG		= 0				; Flag to add ID string
 MYDRIVE		= 8				; Default Drive Number, ie: 8
 DRIVEUNIT	= 0				; Default Unit Numberm ie: 0 or 1
@@ -74,6 +74,9 @@ DSELMEM		= $BA				; LO Selected Item Memory Pointer
 
 DCOUNT		= $BC				; Counter for directory display
 DENTRY		= $BD				; Index of current Entry
+CMDKEY		= $BE				; Command Keypress
+CMDJUMP		= $BF				; LO Command Jump
+;		= $C0				; HI Command Jump
 
 ;-- $ED-$F7 not used in 80-column machines. Safe to use here for now?
 
@@ -140,10 +143,9 @@ Start:
 		JSR DrawUI			; Draw the interface
 
 		JSR LoadLeftDir			; Load the LEFT directory		
+		JSR LoadRightDir		; Load the RIGHT directory
+		JSR ShowRightDir		; Show the RIGHT directory
 		JSR ShowLeftDir			; Show the LEFT directory
-
-;		JSR LoadRightDir		; Load the RIGHT directory
-;		JSR ShowRightDir		; Show the RIGHT directory
 
 		JSR GetDiskStatus		; Get Disk Status
 
@@ -163,6 +165,13 @@ BrowseDone:	RTS				; Exit Program
 ; This is the main code that runs to interact with the program features. It reads
 ; keystrokes and acts on them, looping around until user exits.
 
+;-------------- Command Key Table and Address Lo/HI Tables
+
+CMDTABLE:	!BYTE 88,17,145,19,32,62,60,47,147,0
+CMDLO:		!BYTE <IsExit,<IsDown,<IsUp,<IsHome,<IsSpace,<IsPgDn,<IsPgUp,<IsSlash,<IsCLS
+CMDHI:		!BYTE >IsExit,>IsDown,>IsUp,>IsHome,>IsSpace,>IsPgDn,>IsPgUp,>IsSlash,>IsCLS
+
+;-------------- Interactive Dispatch
 Interact:
 		INC DEBUGRAM			; DEBUG!!!!!!!!!!!!!!!!!!!!!
 
@@ -171,22 +180,24 @@ Interact:
 
 		STA DEBUGRAM + 1		; DEBUG!!!!!!!!!!!!!!!!!!
 
-		CMP #88				; Is it <X>?
-		BEQ IsExit			; Yes, Exit!
-		CMP #17				; Is it <DOWN>?
-		BEQ IsDown			;
-		CMP #145			; Is it <UP>?
-		BEQ IsUp			;
-		CMP #19				; Is it <HOME>?
-		BEQ IsHome			;
-		CMP #32				; Is it <SPACE>?
-		BEQ IsSpace
-		CMP #62				; Is it ">"?
-		BEQ IsPgDn
-		CMP #60				; Is it ">"?
-		BEQ IsPgUp
+		STA CMDKEY			; Save Key
 
-		JMP Interact			; Loop back for more
+		LDY #0				; Set Index to start of table
+KeyLookup:	LDA CMDTABLE,Y			; Get a Key from the table
+		INY				; Index for next key
+		CMP #0				; End of Key List?
+		BEQ Interact			; Yes, loop for another key
+		CMP CMDKEY			; Is is a key from the table?
+		BNE KeyLookup			; No, loop for next Key
+
+KeyFound:	DEY
+		LDA CMDLO,Y			; Get Target Address LO
+		STA CMDJUMP			; Store it
+		LDA CMDHI,Y			; Get Target Address LO
+		STA CMDJUMP+1			; Store it
+		JMP (CMDJUMP)			; Go to the Target Address
+
+;-------------- Interactive Routines
 
 IRefresh:	JSR ShowDirectory		; Re-draw Directory
 ILoop:		JMP Interact			; Loop back for more
@@ -252,13 +263,26 @@ IsSpaceX:	TXA
 
 ;-------------- Perform Page DOWN
 
-IsPgDn:		CLC
-		LDA DTOP			; Directory TOP
-		ADC #DIRHEIGHT			; Add height of display box
-		CMP #DEND			; Does it go past END?
-		BMI ILoop			; Yes, abort!
-		STA DTOP			; No, so set DTOP
-		JMP IRefresh			; Re-draw list
+IsPgDn:		CLC				;-- Check if END is less than PgDn
+		LDA DEND			; Directory END
+		SBC DBOT			; Subtract BOTTOM
+		CMP #DIRHEIGHT			; Is it more than height of display?
+		BPL OkDown			; Yes, do it
+
+NoDown:		CLC				;-- Set TOP to be one page from BOT
+		LDA DEND			; No, get END
+		SBC #DIRHEIGHT			; Subtract height of display
+		STA DTOP			; Use it for TOP
+		STA DSEL			; Put selected at TOP too
+		JMP IRefresh
+
+OkDown:		LDA DTOP			;-- Set TOP to be PgDn
+		ADC #DIRHEIGHT			; Add height of display
+		STA DTOP			; Set it
+		LDA DSEL			; Get SELECTED
+		ADC #DIRHEIGHT			; Add height of display
+		STA DSEL			; Set it
+		JMP IRefresh
 
 ;-------------- Perform Page UP
 
@@ -267,12 +291,26 @@ IsPgUp:		CLC
 		CMP #DIRHEIGHT			; Height of display box
 		BPL IPUfull			; Is it more? Yes, jump full page
 		LDA #0				; No, just go to FIRST entry
-		STA DTOP
+		STA DTOP			; Set it
 		JMP IRefresh
-IPUfull		SBC #DIRHEIGHT			; Subtract height of display box
+
+IPUfull:	SBC #DIRHEIGHT			; Subtract height of display box
 		STA DTOP			; Set DTOP
+		LDA DSEL			; SELECTED
+		SBC #DIRHEIGHT			; Subtract height of display box
+		STA DSEL			; Save it
 		JMP IRefresh			; Re-draw list
-		
+
+;-------------- Perform Select Directory LEFT/RIGHT
+
+IsSlash:	
+
+
+;-------------- Perform Load new Drive/Unit
+
+IsCLS:
+
+
 ;-------------- We are lost... for now
 
 		JMP IRefresh
@@ -942,11 +980,13 @@ DrawUI:		JSR $E015			; Clear Screen
 ProgInfo:	!BYTE MSGROW-1,0				; Message ROW
 		!PET  "stevebrowse 2021-04-11",0 		; Title text
 KeyBar:		!BYTE HELPROW,0					; HELP ROW
+		!PET  RVS,"cls",   ROFF,"drive "		; Select Drive
+		!PET  RVS,"/",     ROFF,"switch "		; Switch Sides
 		!PET  RVS,"crsr",  ROFF,"sel "			; Cursor
 		!PET  RVS,"home",  ROFF,"top "			; Home
 		!PET  RVS,"<>",    ROFF,"page "			; Page Up/Down
 		!PET  RVS,"space", ROFF,"mark "			; Space
-		!PET  RVS,"return",ROFF,"run/cd "		; Return		
+		!PET  RVS,"return",ROFF,"run/cd "		; Return
 		!BYTE RVS,94,      ROFF				; UpArrow
 		!PET  "root",0					; 
 
@@ -984,6 +1024,27 @@ SLA80_Lo	!byte $00,$50,$a0,$f0,$40,$90,$e0,$30,$80,$d0,$20,$70,$c0
 
 SLA80_Hi	!byte $80,$80,$80,$80,$81,$81,$81,$82,$82,$82,$83,$83,$83
 		!byte $84,$84,$84,$85,$85,$85,$85,$86,$86,$86,$87,$87
+
+;		CMP #88				; Is it <X>?     - Exit
+;		BEQ IsExit			; 
+;		CMP #17				; Is it <DOWN>?  - Move Selection DOWN
+;		BEQ IsDown			;
+;		CMP #145			; Is it <UP>?    - Move Selection UP
+;		BEQ IsUp			;
+;		CMP #19				; Is it <HOME>?  - Back to Top
+;		BEQ IsHome			;
+;		CMP #32				; Is it <SPACE>? - Toggle Mark
+;		BEQ IsSpace
+;		CMP #62				; Is it ">"?     - Page Down
+;		BEQ IsPgDn
+;		CMP #60				; Is it "<"?     - Page UP
+;		BEQ IsPgUp
+;		CMP #47				; Is it "/"?     - Select Directory
+;		BEQ IsSlash
+;		CMP #147			; Is it <CLS>    - Change Drive/Unit
+;		BEQ IsCLS
+
+		JMP Interact			; Loop back for more
 
 
 
