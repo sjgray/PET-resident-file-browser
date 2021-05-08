@@ -21,6 +21,7 @@ BACKACTION	= 0
 !SOURCE "memkernal.asm"				; KERNAL calls
 !SOURCE "memlow.asm"				; Low Memory locations
 !SOURCE "memzeropage.asm"			; Zero Page locations
+PRINT		= $FFD2				; Print a character routine
 
 ;-------------- Constants
 
@@ -53,11 +54,9 @@ ROFF		= 146				; <OFF>
 
 ACTIVEDIR	= $B1				; LO Screen Save Buffer Pointer
 ;		= $B2				; HI
-CMDMEM		= $B3				; LO Command String Buffer Pointer
-;		= $B4				; HI
 SCNWID		= $B5				; Current Screen Width 
 CLMARGIN	= $B6				; Cursor LEFT Margin
-;		= $B7				; FREE
+SELMEM		= $B7				; Selected Item Memory Pointer
 ;		= $B8				; FREE
 
 ;-- Details for Directory being Browsed
@@ -84,32 +83,36 @@ ZP3		= $F2				; Work Pointer - Directory display
 
 TAPEBUFFER      = $027A				; 634   Tape buffer
 
-SCNSAVE1	= TAPEBUFFER+1			; $027B Cursor Pointer LO
-SCNSAVE2	= TAPEBUFFER+2			; $027C Cursor Pointer HI
-SCNSAVE3	= TAPEBUFFER+3			; $027D Cursor Column/offset
-SCNSAVE4	= TAPEBUFFER+4			; $027E Cursor Row
-SCNMEM		= TAPEBUFFER+5			; $027F LO Pointer to Screen Buffer
-;		= TAPEBUFFER+6			; $0280 HI Pointer to Screen Buffer
+SCNSAVE1	= TAPEBUFFER			; $027B Cursor Pointer LO
+SCNSAVE2	= TAPEBUFFER+1			; $027C Cursor Pointer HI
+SCNSAVE3	= TAPEBUFFER+2			; $027D Cursor Column/offset
+SCNSAVE4	= TAPEBUFFER+3			; $027E Cursor Row
+SCNMEM		= TAPEBUFFER+4			; $027F LO Pointer to Screen Buffer
+;		= TAPEBUFFER+5			; $0280 HI Pointer to Screen Buffer
+CMDMEM		= TAPEBUFFER+6			; $0281 LO Command String Buffer Pointer
+;		= TAPEBUFFER+7			; $0282 HI
 
 ;-- Details for LEFT Directory
 
 LDIRMEM		= TAPEBUFFER+10			; $0284 LO LEFT Directory Buffer
 ;		= TAPEBUFFER+11			; $0285 HI LEFT Directory Buffer
-LDIRTOP		= TAPEBUFFER+12			; $0286 LEFT Index of Top Entry
-LDIRSEL		= TAPEBUFFER+13			; $0287 LEFT Index of Selected entry
-LDIRBOT		= TAPEBUFFER+14			; $0288 LEFT Index of Bottomd entry
-LDIREND		= TAPEBUFFER+15			; $0289 LEFT Index of Last Entry
+LDIRTOPMEM	= TAPEBUFFER+12			; $0286 LO LEFT Top Memory Pointer
+;		= TAPEBUFFER+13			; $0287 HI LEFT Top Memory Pointer
+LDIRTOP		= TAPEBUFFER+14			; $0288 LEFT Index of Top Entry
+LDIRSEL		= TAPEBUFFER+15			; $0289 LEFT Index of Selected entry
+LDIRBOT		= TAPEBUFFER+16			; $028A LEFT Index of Bottomd entry
+LDIREND		= TAPEBUFFER+17			; $028B LEFT Index of Last Entry
 
 ;-- Details for RIGHT Directory
 
 RDIRMEM		= TAPEBUFFER+20			; $028E LO RIGHT Directory Buffer
 ;		= TAPEBUFFER+21			; $028F HI RIGHT Directory Buffer
-RDIRTOP		= TAPEBUFFER+22			; $0290 RIGHT Index of Top Entry
-RDIRSEL		= TAPEBUFFER+23			; $0291 RIGHT Index of Selected entry
-RDIRBOT		= TAPEBUFFER+24			; $0292 RIGHT Index of Bottom entry
-RDIREND		= TAPEBUFFER+25			; $0293 RIGHT Index of Last Entry
-
-;-- Screen Buffer
+RDIRTOPMEM	= TAPEBUFFER+22			; $0286 LO RIGHT Top Memory Pointer
+;		= TAPEBUFFER+23			; $0287 HI RIGHT Top Memory Pointer
+RDIRTOP		= TAPEBUFFER+24			; $0290 RIGHT Index of Top Entry
+RDIRSEL		= TAPEBUFFER+25			; $0291 RIGHT Index of Selected entry
+RDIRBOT		= TAPEBUFFER+26			; $0292 RIGHT Index of Bottom entry
+RDIREND		= TAPEBUFFER+27			; $0293 RIGHT Index of Last Entry
 
 
 ;======================================================================================
@@ -126,10 +129,12 @@ Start:
 		JSR FindScnWidth		; Determine width of screen
 		
 		JSR DrawUI			; Draw the interface
+
 		JSR LoadLeftDir			; Load the LEFT directory		
+		JSR ShowLeftDir			; Show the LEFT directory
+
 ;		JSR LoadRightDir		; Load the RIGHT directory
 ;		JSR ShowRightDir		; Show the RIGHT directory
-		JSR ShowLeftDir			; Show the LEFT directory
 
 		JSR GetDiskStatus		; Get Disk Status
 
@@ -151,13 +156,15 @@ BrowseDone:	RTS
 ; keystrokes and acts on them, looping around until user exits.
 
 Interact:
+		INC SCREEN_RAM+30		; DEBUG!!!!!!!!!!!!!!!!!!!!!
+
 		JSR GETIN			; Get keystroke to .A
 		BEQ Interact			; No press, go back
 
-		STA SCREEN_RAM			; DEBUG!!!!!!!!!!!!!!!!!!
+		STA SCREEN_RAM + 32		; DEBUG!!!!!!!!!!!!!!!!!!
 
 		CMP #88				; Is it <X>?
-		BEQ IDone			; Yes, Exit!
+		BEQ IsExit			; Yes, Exit!
 		CMP #17				; Is it <DOWN>?
 		BEQ IsDown			;
 		CMP #145			; Is it <UP>?
@@ -172,66 +179,115 @@ IRefresh:	JSR ShowDirectory		; Re-draw Directory
 ILoop:		JMP Interact			; Loop back for more
 		
 
-IDone:		RTS				; Exit!
+IsExit:		RTS				; Exit!
 
 ;-------------- Perform UP
 
-IsUp:		LDY DTOP			; TOP Entry
-		CPY #0				; Is it at the TOP?
-		BEQ ILoop			; Yes, can't go up. abort.
-		LDY DSEL			; SELECTED Entry
+IsUp:		LDY DSEL			; SELECTED Entry
 		CPY DTOP			; Is it at TOP?
-		BNE IsUp2			; No, It can move up, skip ahead
-		DEC DTOP			; Yes, Move Top UP
-IsUp2		DEC DSEL			; Move Selected Up
+		BEQ YesTop			; Yes, try to scroll up. skip ahead
+		DEC DSEL			; No, it's safe to move to prev entry
+		JMP IRefresh			; Redraw directory
+
+YesTop:		LDY DTOP			; Get TOP
+		BEQ ILoop			; Is it Zero? no moving up. skip
+
+		DEC DTOP			; Move TOP Up
+		DEC DSEL			; Move SELECTED Up
 		JSR DScrollDOWN			; Do Scroll DOWN
-		JMP IRefresh			; Refresh
+NoUp:		JMP IRefresh			; Refresh
+		
 
 ;-------------- Perform DOWN		
 
 IsDown:		LDY DSEL			; SELECTED entry
-		CMP DEND			; Is is equal to END entry
+		CPY DEND			; Is is at the END?
 		BEQ ILoop			; Yes, can't go down. abort.
-		INY				; Move it down
-		STY DSEL			; Save it
-		CPY DBOT			; Is it at the BOTTOM?
-		BNE IsDown2			; No, skip ahead
-		INC DTOP			; Yes, Move the TOP down
-		JSR DScrollUP			; Do Scroll UP
-IsDown2:	JMP IRefresh
 
-;-------------- Perform
+		INC SCREEN_RAM+120		; DEBUG
+
+		CPY DBOT			; Is it at BOTTOM
+		BEQ IsDownOK			; Yes, need to scroll
+		INC DSEL			; No, just inc SELECTED
+		BNE IRefresh		
+
+IsDownOK	INC DSEL			; Move SELECTED down
+		INC DTOP
+		JSR DScrollUP			; Do Scroll UP
+		JMP IRefresh
+
+;-------------- Perform HOME
 
 IsHome:		LDY #0				; First Entry
 		STY DTOP			; Set TOP
+		INY
 		STY DSEL			; Set SELECTED
+		JSR DScrollTOP			; Scroll to TOP
+		JSR DrawUI
 		JMP IRefresh
 
-;-------------- Perform
+;-------------- Perform SPACE
 
-IsSpace:
+IsSpace:	LDA DSEL			; Is SELECTED zero? (header)
+		BEQ ILoop			; Yes, abort
+		INC SCREEN_RAM+200		; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!
+		
+;		LDA #95
+;		LDY #18
+;		STA (SELMEM),Y
+;		JMP IRefresh
 
+		LDY #18				; Index for MARK character
+		LDX #32				; Assume we need to de-Select
+		LDA (SELMEM),Y			; Get the bye
+		CMP #95				; Is it <BACKARROW>?
+		BEQ IsSpaceX			; Yes, deselect it
+		LDX #95				; No, make it <BACKARROW>
+IsSpaceX:	TXA
+		STA (SELMEM),Y			; Write <BACKARROW> to entry
+		JMP IRefresh
 
 ;-------------- We are lost
 
 		JMP IRefresh
 
 ;-------------- Directory Scrolling
-DScrollUP:	JSR TopToPointer		; Load the Work Pointers
-		SBC #DIRLENGTH			; Subtract entry length
+; Takes the current DTOPMEM pointer and loads into ZP3 pointer.
+; Scrolling up or down adds or subtracts DRECLEN constant to update ZP3.
+
+DScrollUP:	JSR DTOP2ZP3			; Load the Work Pointers
+		ADC #DRECLEN			; Subtract entry length
 		STA ZP3				; Store it
+		STA DTOPMEM
 		BCC DScrollX			; Did it cross the page?
-		DEC ZP3+1			; Page cross
+		INC ZP3+1			; Page cross
+		INC DTOPMEM+1
 		RTS
 
-DScrollDOWN:	JSR TopToPointer
-		ADC #DIRLENGTH			; Add entry length
-		STA ZP3				; Store it
+DScrollDOWN:	JSR DTOP2ZP3			; Load the Work Pointers
+		SBC #DRECLEN			; Add entry length
+		STA ZP3				; Store it		
+		STA DTOPMEM			
 		BCC DScrollX			; Did it cross the page?
-		INC zP3+1
+		INC ZP3+1
+		INC DTOPMEM+1
 		RTS
-TopToPointer:
-		LDA DTOPMEM+1			; HI DTOP Memory Address
+
+;-------------- 
+DScrollTOP:	LDY DMEM			; LO DMEM points to start
+		INY
+		INY
+		STY DTOPMEM			; LO Work Pointer
+		STY ZP3
+
+		LDA DMEM+1			; HI
+		STA DTOPMEM+1			; HI
+		STA ZP3+1
+		RTS 
+
+;-------------- Load the DTOPMEM pointer and copy to ZP3
+
+DTOP2ZP3:	LDA DTOPMEM+1			; HI DTOP Memory Address
 		STA ZP3+1			; HI Store in Work Pointer
 		LDA DTOPMEM			; LO DTOP Memory Address
 		STA ZP3				; LO Store in Work Pointer
@@ -295,20 +351,50 @@ ShowTest:	STA DCOL			; Directory Column
 SetDirMem:	STY DMEM			; LO Pointer for Dir Memory
 		INY				; Add 2 to skip block bytes
 		INY
+		STY DTOPMEM			; LO Top Index Memory Pointer
 		STY ZP3				; LO Work Pointer
+
 		STA DMEM+1			; HI Pointer for Dir Memory
+		STA DTOPMEM+1			; HI Top Index Memory Pointer
 		STA ZP3+1			; HI Work Pointer
+		RTS
+
+DIRDEBUG:	LDY DTOPMEM
+		STY SCREEN_RAM+40
+		LDY DTOPMEM+1
+		STY SCREEN_RAM+41
+
+		LDY DTOP
+		STY SCREEN_RAM+43
+		LDY DSEL
+		STY SCREEN_RAM+44
+		LDY DBOT
+		STY SCREEN_RAM+45
+		LDY DEND
+		STY SCREEN_RAM+46
 		RTS
 
 ;======================================================================================
 ; SHOW DIRECTORY
 ;======================================================================================
+; ZP3 pointer used to walk through directory memory
+; Copy ZP3 to DTOPMEM so we can Scroll relative to this.
+; Update DTOP. Increment DENTRY as we go. Count displayed lines in DCOUNT.
+; When bottom is reached save to DBOT.
+; DSEL is the currently selected entry - it must be marked (somehow!!!!!)
 
-ShowDirectory:	LDY DTOP			; Top Entry
+ShowDirectory:
+		JSR DIRDEBUG
+		LDY DTOPMEM			; LO DTOP Memory Address
+		STY ZP3				; LO Work Pointer
+		LDY DTOPMEM+1			; HI DTOP Memory Address
+		STY ZP3+1			; HI Work Pointer
+		LDY DTOP			; Top Entry
 		STY DENTRY			; Make it Current Entry
 
 		LDY #0				; Count=1 (first entry displayed)
 		STY DCOUNT			; Entry Counter
+		STY DEND			; END Index
 
 ;-------------- Position Cursor
 
@@ -318,33 +404,64 @@ SDLoop:		LDA #DIRROW			; Cursor Position for Top Left
 		LDY DCOL			; Column for selected directory
 		JSR CursorAt			; Move cursor to top of directory
 
-;-------------- Print the entry
-
 		LDY #0				; Index for print loop
 		STY ReverseFlag			; also, set <RVS> off
 
+SDSelection:
+		LDA #32				; Assume <SPACE> character
+		LDY DCOUNT			; What is the entry#?
+		CPY DSEL			; Is it SELECTED?
+		BNE SDpoint			; No, skip ahead
+
+;-------------- Selected Item - Save Pointer
+		LDA ZP3				; Save pointer to SELECTED
+		STA SELMEM			; LO SELECTED memory pointer
+		STA SCREEN_RAM+ 36		; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!
+		LDA ZP3+1			; HI Work Pointer
+		STA SELMEM+1			; HI SELECTED memory pointer
+		STA SCREEN_RAM+ 37		; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+		LDA #62				; Yes, use ">" character
+SDpoint:	JSR $FFD2			; Print It!
+
+;-------------- Check if Entry is Marked
+
+		LDY #18				; Offset for in entry for Marker
+		LDA (ZP3),Y			; Get the byte
+		CMP #95				; Is it <BACKARROW>?
+		BNE NotMarked			; No, skip ahead
+		LDA #18				; Yes, print <RVS>
+		JSR PRINT			; Print It!
+
+;-------------- Print the entry
+
+NotMarked:	LDY #0				; Start index at zero
+
 SDprint:	LDA (ZP3),Y			; Get character at pointer
 		CMP #0				; Is it <NULL>?
-		BEQ SDnext			; Yes, we are done
-		JSR $FFD2			; No, print it!
+		BEQ SDpos			; Yes, we are done
+		JSR PRINT			; No, print it!
 		INY				; next character
 		BNE SDprint			; Jump back for more
 
-SDnext:		LDA ZP3				; LO Work Pointer
+;-------------- Move Work Pointer to next entry
+
+SDpos:		LDA ZP3				; LO Work Pointer
 		CLC				; prep for Add
 		ADC #DRECLEN			; Add record len to pointer
 		STA ZP3				; LO Work Pointer
-		BCC SDNext			; Did it cross page? No skip ahead
+		BCC SDnext			; Did it cross page? No skip ahead
 		INC ZP3+1			; Yes, inc page.
 
-SDNext:		INC DCOUNT			; Next Entry#
-		LDA DCOUNT			; Get it again
-		STA DBOT			; Set as BOTTOM (temporarily)
+SDnext:		INC DCOUNT			; Next Entry#
+		LDA DCOUNT			; Get it again		
+		STA DBOT			; Set as BOTTOM (temporarily)		
 		CMP #DIRHEIGHT			; Is it at end of box?
-		BEQ SDexit			; Yes, exit
+		BEQ SDexit			; Yes, exit		
 		CMP DEND			; Is it at the end of the directory?
 		BNE SDLoop			; No, Go back for another entry
-SDexit:		RTS
+SDexit:		DEC DBOT
+		RTS
 
 
 ;======================================================================================
@@ -558,11 +675,12 @@ LoadRightDir:
 ;-------------- Prep
 LoadDirectory:
 		LDA #0				; Clear pointers
-		STA DTOP			; Index of Top entry
-		STA DSEL			; Index of Selected Entry
+		STA DTOP			; Index of Top entry		
 		STA DEND			; Index of Last Entry
 		STA DCOUNT			; Counter for directory display
-		
+		LDA #1				; Make entry after header SELECTED
+		STA DSEL			; Index of Selected Entry
+  
 		LDA #<ReadingDir		; Print "Reading.."
 		LDY #>ReadingDir
 		JSR SetStatus
@@ -653,6 +771,7 @@ StopListing:	JSR CLSEI			; close file with $E0, unlisten
 		LDY #>DirLoaded		
 		JSR SetStatus
 		LDX DCOUNT			; LO # of entries = DCOUNT
+		STX DEND			; save as END
 		LDA #0				; HI # of entries = 0
 		JSR INTOUT			; write #blocks to screen
 		RTS
@@ -831,11 +950,12 @@ DrawUI:		JSR $E015			; Clear Screen
 ;-------------- User Interface
 
 ProgInfo:	!BYTE 21,0					; ROW=22,COL=0
-		!PET  "stevebrowse 2021-04-09  " 		; title text
+		!PET  "stevebrowse 2021-04-10",0 		; title text
 KeyBar:		!BYTE 22,0					; ROW=23,COL=0
 		!PET  RVS,"crsr",  ROFF,"sel "			; cursor
-		!PET  RVS,"return",ROFF,"run/cd "		; return
 		!PET  RVS,"home",  ROFF,"top "			; home
+		!PET  RVS,"space",  ROFF,"mark "		; space
+		!PET  RVS,"return",ROFF,"run/cd "		; return		
 		!BYTE RVS,94,      ROFF				; UPARROW
 		!PET  "root",0					; 
 
@@ -849,35 +969,6 @@ ReadingDir:	!PET "reading...",0
 DirLoaded:	!PET 146,"# of entries:",0
 Copying		!PET "copying...",0
 Renaming:	!PET "renaming...",0
-
-;======================================================================================
-; Keyboard Command Dispatch
-;======================================================================================
-
-;-------------- Keyboard Command Bytes
-
-Keylist:	!byte $91,$11,$9D,$1D,$0D,$20,$03,$83		;<UP><DOWN><LEFT><RIGHT><ENTER><SPACE><STOP><RUN> Basic Browsing Keys
-		!byte $43,$51					;<C>opy <Q>uit - Commands
-
-KeyJumpLO:	!byte <KeyUp,<KeyDown,<KeyLeft,<KeyRight,<KeyEnter,<KeySpace,<KeyStop,<KeyRun
-		!byte <KeyCopy,<KeyQuit
-
-KeyJumpHI:	!byte >KeyUp,>KeyDown,>KeyLeft,>KeyRight,>KeyEnter,>KeySpace,>KeyStop,>KeyRun
-		!byte >KeyCopy,>KeyQuit
-
-;-------------- Key Routines Placeholder (Routines not yet written)
-
-KeyUp:
-KeyDown:
-KeyLeft:
-KeyRight:
-KeyEnter:
-KeySpace:
-KeyStop:
-KeyRun:
-KeyCopy:
-KeyQuit:
-		RTS
 
 
 ;======================================================================================
