@@ -26,8 +26,8 @@ BACKACTION	= 0
 
 SCREENPAGES     = 8				; 2K size for 80 col
 DIRWIDTH        = 16				; Width of directory window
-DIRHEIGHT	= 18				; Height of directory window
-DIRROW		= 1				; Row for first directory line
+DIRHEIGHT	= 20				; Height of directory window
+DIRROW		= 0				; Row for first directory line
 DIRCOL		= 1				; Column for directory listing
 IDFLAG		= 0				; Flag to add ID string
 MYDRIVE		= 8				; Default Drive Number, ie: 8
@@ -161,6 +161,11 @@ ShowLeftDir:	LDY LDIRMEM			; LO Pointer to LEFT Directory Buffer
 		LDY LDIRMEM+1			; HI Pointer to LEFT Directory Buffer
 		STY DMEM+1			; HI Pointer for Dir Memory
 		STY ZP3+1			; HI Work Pointer
+		LDY LDIREND			; Index of LEFT last entry
+		STY DEND			; Index of last entry
+		CPY #0				; Is DEND zero?
+		BNE ShowDirectory		; No, good to go
+		RTS				; Yes, nothing to show!
 
 ;======================================================================================
 ; SHOW DIRECTORY
@@ -168,12 +173,7 @@ ShowLeftDir:	LDY LDIRMEM			; LO Pointer to LEFT Directory Buffer
 
 ShowDirectory:	LDY DTOP			; Top Entry
 		STY DENTRY			; Make it Current Entry
-		LDY LDIREND
-		STY DEND
-		CPY #0				; Is DEND zero?
-		BNE SDgo			; No, good to go
-		RTS				; Yes, nothing to show!
-SDgo:		LDY #0				; Count=1 (first entry displayed)
+		LDY #0				; Count=1 (first entry displayed)
 		STY DCOUNT			; Entry Counter
 
 ;-------------- Position Cursor
@@ -200,15 +200,15 @@ SDnext:		LDA ZP3				; LO Work Pointer
 		CLC				; prep for Add
 		ADC #DRECLEN			; Add record len to pointer
 		STA ZP3				; LO Work Pointer
-		BNE SDNext			; Did it cross page? No skip ahead
+		BCC SDNext			; Did it cross page? No skip ahead
 		INC ZP3+1			; Yes, inc page.
 
 SDNext:		INC DCOUNT			; Next Entry#
 		LDA DCOUNT			; Get it again
 		CMP #DIRHEIGHT			; Is it at end of box?
-		BEQ SDexit
-		CMP DEND			; Is it at the end of the directory
-		BNE SDLoop			; No, Go back for another entry
+		BEQ SDexit			; Yes, exit
+		CMP DEND			; Is it at the end of the directory?
+		BMI SDLoop			; No, Go back for another entry
 SDexit:		RTS
 
 
@@ -346,7 +346,11 @@ SENDCMDDONE	JSR UNLSN			; un-listen
 ;======================================================================================
 ; Read the status string: ##,String,TT,SS
 
-GetDiskStatus:	LDA MYDRIVE			; Current Device#
+GetDiskStatus:
+		LDA #24
+		LDY #0
+		JSR CursorAt
+		LDA MYDRIVE			; Current Device#
 		STA FA				; Set device number
 		JSR TALK			; TALK
 		LDA #$6f			; Secondary Address=15
@@ -359,8 +363,7 @@ GS_NEXTCHAR	jsr ACPTR			; Read byte from IEEE bus
 		jsr SCROUT			; no, write char to screen
 		jmp GS_NEXTCHAR			; go back for more
 
-GS_DONE		jsr SCROUT			; write <CR> to screen
-		jsr UNTLK			; UNTALK
+GS_DONE		jsr UNTLK			; UNTALK
 		RTS				; jmp READY ; Back to BASIC
 
 ;======================================================================================
@@ -492,8 +495,12 @@ Entry_done:	LDA DCOUNT			; Get Counter
 
 StopListing:	JSR CLSEI			; close file with $E0, unlisten
 		LDA #<DirLoaded
-		LDY #>DirLoaded
-		JMP SetStatus
+		LDY #>DirLoaded		
+		JSR SetStatus
+		ldx DCOUNT			; # of entries
+		lda #0
+		jsr INTOUT			; write #blocks to screen
+		rts
 
 
 ;-------------- Directory Read / Discard / Store, and Pointer Update ZP1
@@ -664,7 +671,7 @@ DrawUI:		LDA #<TitleBar
 		LDY #>DirBox1
 		JSR STROUTZ			; Print top line
 
-		LDA #DIRHEIGHT			; Height of Dir Box
+		LDA #DIRHEIGHT-1		; Height of Dir Box
 		STA ZP1				; Save it
 
 DUILoop:	LDA #<DirBox2
@@ -681,9 +688,9 @@ DUIBar:		LDA #<KeyBar
 		LDY #>KeyBar
 		JSR PrintAt			; Print key bar line
 
-		LDA #24				; Last ROW
-		LDY #45				; RVS Space
-		JSR FillRow			; Clear the ROW
+DUITitle:	LDA #<Help
+		LDY #>Help
+		JSR PrintAt
 		RTS
 
 ;======================================================================================
@@ -692,7 +699,7 @@ DUIBar:		LDA #<KeyBar
 
 ;-------------- User Interface
 
-TitleBar:	!PET 147,18,"stevebrowse 2021-04-08",13,0	; Top Line Titlebar
+TitleBar:	!PET 147,0
 DirBox1:	!BYTE $B0					; Top Left Corner
 		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
 		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
@@ -702,8 +709,12 @@ DirBox3:	!BYTE $AD					; Bottom Left Corner
 		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
 		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
 		!BYTE $BD,13,0					; Bottom Right Corner, CR
+
 KeyBar:		!BYTE 5,30 ;ROW/COL
 		!PET "up/dn=sel,return=run/cd, r=root",19,13,0	; Keys <home> - NO CR
+
+Help:		!BYTE 0,30
+		!PET 18,"stevebrowse 2021-04-08",13,0		; Help 
 
 ;-------------- 
 HomeHome:	!BYTE 19,19,147,17,0				; <HOME><HOME><CLS><DOWN>
@@ -711,7 +722,7 @@ FNDirectory:	!PET "$0",0					; Directory string
 
 AreUSure:	!PET "are you sure (y/n)?",0
 ReadingDir:	!PET "reading directory...",0		
-DirLoaded:	!PET "directory loaded: ",0
+DirLoaded:	!PET "directory entries:",0
 Copying		!PET "copying...",0
 Renaming:	!PET "renaming...",0
 
