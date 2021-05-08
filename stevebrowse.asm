@@ -1,5 +1,5 @@
 ; PET/CBM EDIT ROM - File Browser and Utility  - Started March 25, 2021
-; ===========================================  - Updated: 2021-04-03
+; ===========================================  - Updated: 2021-04-04
 ;
 ; A File Browser Utility that can be included in Editor ROM or Option ROM.
 ;
@@ -44,13 +44,23 @@ SCNSAVE2	= $B3				; Cursor Pointer HI
 SCNSAVE3	= $B4				; Cursor Column/offset
 SCNSAVE4	= $B5				; Cursor Row
 SCNMEM		= $B6				; Screen Save Buffer Pointer
-LDIRMEM		= $B8				; LEFT Directory Buffer Pointer
-LDIRTOP		= $BA				; LEFT Index of Top Entry
-LDIRSEL		= $BB				; LEFT Index of selected entry
-LDIREND		= $BC				; LEFT Index of Last Entry
-CMDMEM		= $BD				; LO Command String Buffer Pointer
-;		= $BE				; HI
-DTMP		= $C3				; Temp counter
+CMDMEM		= $B7				; LO Command String Buffer Pointer
+;		= $B8				; HI
+
+;						Details for LEFT Directory
+
+LDIRMEM		= $B9				; LEFT Directory Buffer Pointer
+LDIRTOP		= $BB				; LEFT Index of Top Entry
+LDIRSEL		= $BC				; LEFT Index of selected entry
+LDIREND		= $BD				; LEFT Index of Last Entry
+
+;						Details for Directory being Browsed
+
+DTOP		= $BE				; Index of Top entry
+DSEL		= $BF				; Index of Selected Entry
+DEND		= $C0				; Index of Last Entry
+DCOUNT		= $C1				; Counter for directory display
+DTMP		= $C2				; Temp counter
 
 ; $ED-$F7 not used in 80-column machines. Safe to use here for now?
 
@@ -85,8 +95,9 @@ BrowseDone:	RTS
 ;===========================================================================================
 ; Subroutines - Work in Progress
 ;===========================================================================================
-
-;-------------- Init Stuff
+;======================================================================================
+; Init Stuff
+;======================================================================================
 ; Here we look at the BASIC pointers to figure out where we can store our data
 ; STREND  pointer is the End of Array pointer which is the first address that is free
 ; FREETOP pointer is the End of RAM and is the last address we can use.
@@ -108,7 +119,9 @@ InitStuff:
 		STA MYDRIVE			; Set it
 		RTS
 
-;-------------- Draw UI
+;======================================================================================
+; DRAW UI
+;======================================================================================
 ; Draw Titlebar, box for the filenames and key help line
 
 DrawUI:		LDA #<TitleBar				
@@ -137,28 +150,32 @@ DUIBar:		LDA #<KeyBar
 		JSR STROUTZ			; Print key bar line
 		RTS
 
-;-------------- Get User Input
+;======================================================================================
+; GET USER INPUT
+;======================================================================================
 ; Wait for any key to be pressed 
 
 AnyKey:		JSR GETIN			; Get keystroke to .A
 		BEQ AnyKey			; None, so loop back
 		RTS
 
-;-------------- Print Debug Progress Markers
-ShowProg:
-		LDA #<ProgStart				
+;======================================================================================
+; DEBUG STRINGS
+;======================================================================================
+
+ShowProg:	LDA #<ProgStart				
 		LDY #>ProgStart
 		JSR STROUTZ			; Print it
 		RTS
 
-ShowMarker:
-		LDA #<ProgMarker				
+ShowMarker:	LDA #<ProgMarker				
 		LDY #>ProgMarker
 		JSR STROUTZ			; Print it
 		RTS
 
-;-------------- My Print Routine
-
+;======================================================================================
+; PRINT ROUTINES
+;======================================================================================
 ; Set ZP1 to point to string. ZP2 will be updated print address
 ; PrintAt: Set .X=Col (0-max), .Y=Row (0-24)
 ; PrintIt: Prints from current position
@@ -170,8 +187,9 @@ PrintIt:
 ;======================================================================================
 ; DISK ROUTINES
 ;======================================================================================
-
-;-------------- SEND COMMAND
+;======================================================================================
+; SEND DOS COMMAND
+;======================================================================================
 ; Send a string to the command channel.
 ; ZP1 points to a null terminated string.
 
@@ -200,11 +218,12 @@ SENDCMD2	LDY #0				; always index 0
 SENDCMDDONE	JSR UNLSN			; un-listen
 		CLC
 
-;-------------- GET DISK STATUS STRING
+;======================================================================================
+; GET DISK STATUS
+;======================================================================================
 ; Read the status string: ##,String,TT,SS
 
-GetDiskStatus:
-		LDA #<GDS1
+GetDiskStatus:	LDA #<GDS1
 		LDY #>GDS1
 		JSR STROUTZ			; debug
 
@@ -227,7 +246,9 @@ GS_DONE		jsr SCROUT			; write <CR> to screen
 
 GDS1:		!PET "drive status: ",0
 
-;-------------- LOAD LEFT/RIGHT DIRECTORY
+;======================================================================================
+; LOAD LEFT/RIGHT DIRECTORY
+;======================================================================================
 ; Sets up pointers for LEFT/RIGHT directory
 ; !!!! For now they will use the same memory
 
@@ -245,12 +266,15 @@ LoadLeftDir:
 		STA LDIREND			; Save it for LEFT				; TODO: save the end address here
 		RTS
 
-;-------------- LOAD DIRECTORY
+;======================================================================================
+; LOAD DIRECTORY
+;======================================================================================
 ; Reads the directory into RAM pointed to by ZP1.
 ; Counts # of directory entries to DTMP.
 
+;-------------- Prep
 LoadDirectory:
-		LDA #<FNDirectory		; LO Pointer to Filename ("$")
+		LDA #<FNDirectory		; LO Pointer to Filename ("$0")
 		STA FNADR			; LO Filename Address pointer
 		LDA #>FNDirectory		; HI
 		STA FNADR+1			; HI 
@@ -268,45 +292,103 @@ LoadDirectory:
 		LDA SA				; Secondary Address
 		JSR SECND			; Set Secondary Address
 
-;-------------- Read the directory file to buffer
+SkipLA:		JSR ACPTR			; Read two bytes Load Address
+		JSR ACPTR			; and discard
 
-list_blocks
-		JSR ACPTR			; read byte from IEEE
-		LDY #0				; Index is always 0
-		STA (ZP1),Y			; Store byte to memory
-		LDX STATUS			; did it read ok?
-		BNE stoplisting			; no, finish
-		CMP #0				; Is it a zero?
-		BEQ entry_done			; Yes, entry is complete
-		INC ZP1				; No, Next byte
-		BNE list_blocks			; Loop for more if no page crossing
-		INC ZP1+1			; Next page
-		BNE list_blocks			; Go back for more
+;-------------- Read and Parse the Header
+
+LoadHeader:	LDX STATUS			; Did it read ok?
+		BNE StopListing			; No, finish
+
+		JSR DDGetStor			; Discard2/Read/Store - LO Drive#
+		JSR GetStor			; Read/Store          - HI Drive#
+		JSR GetStor			; Get <RVS>
+		JSR GetStor			; Get <QUOTE>
+
+SkipToQ:	JSR GetStor			; Read/Store title character
+		CMP #34				; Is it a <QUOTE>?
+		BNE SkipToQ			; No, loop back
+		JSR DGetStor			; Discard <SPACE> Get first ID
+		JMP SkipToEnd			; Discard rest of line
+
+;-------------- Read and parse File Entry or Blocks Free
+
+LoadEntry:	LDX STATUS			; Did it read ok?
+		BNE StopListing			; No, finish
+
+		JSR DDGetStor			; Discard 2, Get Blocks LO
+		JSR GetStor			; Get Blocks HI
+
+LoadELoop	JSR ACPTR			; Get a byte
+		CMP #32				; Is it <SPACE>
+		BEQ LoadELoop			; Yes, ignore, then go back for more
+		JSR StorIt			; No, must be <QUOTE> or <B>
+		CMP #66				; Is it a <B>?
+		BEQ BlocksFree			; Yes, parse blocks free
+						; No, must be <Quote> to continue
+;-------------- Read and parse Filename
+
+LoadFName:	JSR GetStor			; Read/Store
+		CMP #34				; Is it a quote?
+		BNE LoadFName			; No, go back for more
+
+GetSpaces:	JSR GetStor			; Store it
+		CMP #32				; Is it a <SPACE>?
+		BEQ GetSpaces			; Yes, get more
+
+SkipToEnd:	JSR ACPTR			; Read 
+		CMP #0				; Is it <NULL>?
+		BNE SkipToEnd
+		JSR StorIt			; Add null to END
+		JMP Entry_done			; jump to done
+
+;-------------- Read and parse Blocks Free line
+
+BlocksFree:	JSR GetStor			; Get and store text
+		CMP #0				; Is it <NULL>
+		BNE BlocksFree			; No, get more
+		jmp StopListing		
 
 ;-------------- Line is complete
 
-entry_done
-		LDA DTMP			; Get Counter
-		STA SCREEN_RAM+39		; debug. show count
+Entry_done:	LDA DTMP			; Get Counter
 		CMP #255			; Is it 255?
-		BEQ stoplisting			; Yes, Maximum entries, so exit
+		BEQ StopListing			; Yes, Maximum entries, so exit
 		INC DTMP			; Counter=Counter+1
-		BNE list_blocks			; Jump back for more lines
+		JMP LoadEntry			; No, Jump back for more lines
 
 ;-------------- Listing is complete
 
-stoplisting	JSR CLSEI			; close file with $E0, unlisten
+StopListing:	JSR CLSEI			; close file with $E0, unlisten
 		LDA #<TEMP2			; debug "Reading:"
 		LDY #>TEMP2
 		JSR STROUTZ			; debug print it
 		RTS
 
+;-------------- Directory Read and Store Routine / ZP1 store
+; Four entry points:
+; 1: Read two Directory bytes and discard (DD)
+; 2: Read one Directory byte  and discard (D)
+; 3: Read one Directory byte to .A
+; 4: Store .A to ZP1 pointer
+; 5: Increment ZP1 Pointer and handle page crossing
 
-;-------------- LOAD / RUN
+DDGetStor:	JSR ACPTR			; Get and ignore
+DGetStor:	JSR ACPTR			; Get and ignore
+GetStor:	JSR ACPTR			; Get a byte
+StorIt:		LDY #0				; Ensure offset is 0
+		STA (ZP1),Y			; Store it
+IncZP1:		INC ZP1				; Increment pointer LO
+		BNE IncDone
+		INC ZP1+1			; Increment pointer HI
+IncDone:	RTS		
+
+;======================================================================================
+; LOAD / RUN
+;======================================================================================
 ; Load a file. Run it too?
 
-loadrun
-		lda #0				; Clear status byte
+loadrun:	lda #0				; Clear status byte
 		sta STATUS
 		sta VERCK			; LOAD=0, VERIFY=1
 		jsr LOADOP			; LOAD without pointer change
@@ -334,29 +416,39 @@ startprg	jsr STXTPT			; reset TXTPTR
 
 loaderr		jmp FILENOTFOUND		; FILE NOT FOUND, return to basic
 
-;======================================================================================
-; Routines that are working
-;======================================================================================
 
-;-------------- Find Screen Width
+
+
+
+
+
+
+
+;**************************************************************************************
+; Routines that are working
+;**************************************************************************************
+;======================================================================================
+; FIND SCREEN WIDTH
+;======================================================================================
 ; This routine prints <HOME><HOME><DOWN> using the standard PET print routines.
 ; It does not disturb the screen. <HOME><HOME> cancels any windowing.
 ; This will place the cursor on the second line. The screen line pointer will be set
 ; and the LO byte will be 40 or 80.
+;>>>>>>> Will linked lines affect result?
 
-FindScnWidth:
-		LDA #<HomeHome			; Address of string to print
+FindScnWidth:	LDA #<HomeHome			; Address of string to print
 		LDY #>HomeHome
 		JSR STROUTZ			; Use standard system print routine
 		LDA ScrPtr			; LO of Start of Line Address
 		STA SCNWID			; Save it
 		RTS
 
-;-------------- SAVE AND RESTORE SCREEN
+;======================================================================================
+; SAVE AND RESTORE SCREEN
+;======================================================================================
 ; Save/Restore the screen to/from RAM pointed at by ZPSCREEN
 
-SaveScreen:
-		LDA #<SCREEN_RAM		; LO Screen address
+SaveScreen:	LDA #<SCREEN_RAM		; LO Screen address
 		STA ZP1				; LO Source pointer
 		LDA #>SCREEN_RAM		; HI Screen address
 		STA ZP1+1			; HI Source pointer
@@ -365,8 +457,8 @@ SaveScreen:
 		LDA SCNMEM+1			; HI Destination address
 		STA ZP2+1			; HI Destination pointer
 		JMP CopyScreen
-RestoreScreen:
-		LDA SCNMEM			; LO Source address
+
+RestoreScreen:	LDA SCNMEM			; LO Source address
 		STA ZP1				; LO Source pointer
 		LDA SCNMEM+1			; HI Source address
 		STA ZP1+1			; HI Source pointer
@@ -375,11 +467,12 @@ RestoreScreen:
 		LDA #>SCREEN_RAM		; HI Destination address
 		STA ZP2+1			; HI Destination pointer
 
-;-------------- COPY SCREEN
+;======================================================================================
+; COPY SCREEN
+;======================================================================================
 ; ZP1 and ZP2 are set, so set .X and fall into copy routine below
 
-CopyScreen:
-		LDX #SCREENPAGES		; How many pages to copy? 8=2K
+CopyScreen:	LDX #SCREENPAGES		; How many pages to copy? 8=2K
 
 ;-------------- BLOCK COPY
 ; Copies .X pages from source ZP1 to destination ZP2
@@ -396,11 +489,12 @@ CopyLoop:	LDA (ZP1),Y			; Read byte
 		BNE CopyLoop			; Back for more		
 		RTS
 
-;-------------- Save/Restore Cursor Position
+;======================================================================================
+; SAVE/RESTORE CURSOR
+;======================================================================================
 ; Saves or Restores the cursor position
 
-SaveCursorPos:
-		LDA ScrPtr			; $C4/C5 - pointer to screen line
+SaveCursorPos:	LDA ScrPtr			; $C4/C5 - pointer to screen line
 		STA SCNSAVE1
 		LDA ScrPtr+1
 		STA SCNSAVE2
@@ -427,7 +521,7 @@ RestoreCursorPos:
 
 ;-------------- User Interface
 
-TitleBar:	!PET 142,$93,"stevebrowse - x=exit",13,0	; Top Line Titlebar
+TitleBar:	!PET 147,18,"stevebrowse 2021-04-05                  ",13,0	; Top Line Titlebar
 DirBox1:	!BYTE $B0					; Top Left Corner
 		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
 		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
@@ -437,30 +531,62 @@ DirBox3:	!BYTE $AD					; Bottom Left Corner
 		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
 		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
 		!BYTE $BD,13,0					; Bottom Right Corner, CR
-KeyBar:		!PET "up/dn=sel,return=run/cd, r=root",19,0	; Keys <home> - NO CR
+KeyBar:		!PET "up/dn=sel,return=run/cd, r=root",19,13,0	; Keys <home> - NO CR
 
 ;-------------- 
 HomeHome:	!BYTE 19,19,17,0				; WAS: 147,13,46,0				; CLS, CR, PERIOD
-FNDirectory:	!PET "$0",0					; Directory string
+FNDirectory:	!PET "$1",0					; Directory string
+AreUSure:	!PET "are you sure (y/n)?",0			; Confirm
 
-;-------------- Screen Line Addresses
+;======================================================================================
+; SCREEN LINE ADDRESS TABLE
+;======================================================================================
 ; This is a table of screen line addresses, representing the address of the start of each line.
 ; There are 50 entries for both HI and LO bytes. Each pair is offset 40 bytes so when
 ; calculating start lines for 80 column you must multiply ROW by 2.
+;
+;SLALO:		!byte $00,$28,$50,$78,$a0,$c8,$f0,$18,$40,$68
+;		!byte $90,$b8,$e0,$08,$30,$58,$80,$a8,$d0,$f8
+;		!byte $20,$48,$70,$98,$c0,$e8,$10,$38,$60,$88
+;		!byte $B0,$d8,$00,$28,$50,$78,$a0,$c8,$f0,$18
+;		!byte $40,$68,$90,$b8,$e0,$08,$30,$58,$80,$a8
+;		!byte $d0
+;
+;SLAHI:		!byte $80,$80,$80,$80,$80,$80,$80,$81,$81,$81
+;		!byte $81,$81,$81,$82,$82,$82,$82,$82,$82,$82
+;		!byte $83,$83,$83,$83,$83,$83,$84,$84,$84,$84
+;		!byte $84,$84,$85,$85,$85,$85,$85,$85,$85,$86
+;		!byte $86,$86,$86,$86,$86,$87,$87,$87,$87,$87
+;		!byte $87
 
-SLALO:		!byte $00,$28,$50,$78,$a0,$c8,$f0,$18,$40,$68
-		!byte $90,$b8,$e0,$08,$30,$58,$80,$a8,$d0,$f8
-		!byte $20,$48,$70,$98,$c0,$e8,$10,$38,$60,$88
-		!byte $B0,$d8,$00,$28,$50,$78,$a0,$c8,$f0,$18
-		!byte $40,$68,$90,$b8,$e0,$08,$30,$58,$80,$a8
-		!byte $d0
+;======================================================================================
+; Init Stuff
+;======================================================================================
 
-SLAHI:		!byte $80,$80,$80,$80,$80,$80,$80,$81,$81,$81
-		!byte $81,$81,$81,$82,$82,$82,$82,$82,$82,$82
-		!byte $83,$83,$83,$83,$83,$83,$84,$84,$84,$84
-		!byte $84,$84,$85,$85,$85,$85,$85,$85,$85,$86
-		!byte $86,$86,$86,$86,$86,$87,$87,$87,$87,$87
-		!byte $87
+;-------------- Keyboard Command Bytes
+
+Keylist:	!byte $91,$11,$9D,$1D,$0D,$20,$03,$83		;<UP><DOWN><LEFT><RIGHT><ENTER><SPACE><STOP><RUN> Basic Browsing Keys
+		!byte $43,$51					;<C>opy <Q>uit - Commands
+
+KeyJumpLO:	!byte <KeyUp,<KeyDown,<KeyLeft,<KeyRight,<KeyEnter,<KeySpace,<KeyStop,<KeyRun
+		!byte <KeyCopy,<KeyQuit
+
+KeyJumpHI:	!byte >KeyUp,>KeyDown,>KeyLeft,>KeyRight,>KeyEnter,>KeySpace,>KeyStop,>KeyRun
+		!byte >KeyCopy,>KeyQuit
+
+;-------------- Key Routines Placeholder (Routines not yet written)
+
+KeyUp:
+KeyDown:
+KeyLeft:
+KeyRight:
+KeyEnter:
+KeySpace:
+KeyStop:
+KeyRun:
+KeyCopy:
+KeyQuit:
+		RTS
 
 ;-------------- Misc Strings
 
