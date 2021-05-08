@@ -28,13 +28,15 @@ SCREENPAGES     = 8				; 2K size for 80 col
 DIRWIDTH        = 16				; Width of directory window
 DIRHEIGHT	= 20				; Height of directory window
 DIRROW		= 0				; Row for first directory line
-DIRCOL0		= 1				; Column for LEFT directory
-DIRCOL1		= 24				; Column for LEFT directory
+DIRCOL0		= 0				; Column for LEFT directory
+DIRCOL1		= 39				; Column for LEFT directory
 IDFLAG		= 0				; Flag to add ID string
 MYDRIVE		= 8				; Default Drive Number, ie: 8
 DRIVEUNIT	= 0				; Default Unit Numberm ie: 0 or 1
 DRECLEN		= 23				; Record length for ram directory
 STATUSROW	= 23				; Location of status row
+RVS		= 18				; <RVS>
+ROFF		= 146				; <OFF>
 
 ;======================================================================================
 ; PROGRAM STORAGE LOCATIONS
@@ -49,23 +51,28 @@ STATUSROW	= 23				; Location of status row
 ;STROUT		= $bb24				; X=len, STRADR=ptr
 
 
-SCNMEM		= $B1				; LO Screen Save Buffer Pointer
+ACTIVEDIR	= $B1				; LO Screen Save Buffer Pointer
 ;		= $B2				; HI
 CMDMEM		= $B3				; LO Command String Buffer Pointer
 ;		= $B4				; HI
-
-SCNWID		= $B7				; Current Screen Width 
-CLMARGIN	= $BA				; Cursor LEFT Margin
+SCNWID		= $B5				; Current Screen Width 
+CLMARGIN	= $B6				; Cursor LEFT Margin
+;		= $B7				; FREE
+;		= $B8				; FREE
 
 ;-- Details for Directory being Browsed
-DMEM		= $BB				; LO Directory Buffer Pointer
+
+DMEM		= $B9				; LO Directory Buffer Pointer
+;		= $BA				; HI
+DTOPMEM		= $BB				; LO Pointer to Top Entry Address
 ;		= $BC				; HI
 DTOP		= $BD				; Index of Top entry
 DSEL		= $BE				; Index of Selected Entry
-DEND		= $BF				; Index of Last Entry
-DCOUNT		= $C0				; Counter for directory display
-DENTRY		= $C1				; Index of current Entry
-DCOL		= $C2				; Left column for directory listing
+DBOT		= $BF				; Index of Bottom Entry
+DEND		= $C0				; Index of Last Entry
+DCOUNT		= $C1				; Counter for directory display
+DENTRY		= $C2				; Index of current Entry
+DCOL		= $C3				; Left column for directory listing
 
 ;-- $ED-$F7 not used in 80-column machines. Safe to use here for now?
 
@@ -75,25 +82,34 @@ ZP3		= $F2				; Work Pointer - Directory display
 
 ;-------------- Memory Locations
 
-TAPEBUFFER      = $027A				; Tape buffer
+TAPEBUFFER      = $027A				; 634   Tape buffer
+
 SCNSAVE1	= TAPEBUFFER+1			; $027B Cursor Pointer LO
 SCNSAVE2	= TAPEBUFFER+2			; $027C Cursor Pointer HI
 SCNSAVE3	= TAPEBUFFER+3			; $027D Cursor Column/offset
 SCNSAVE4	= TAPEBUFFER+4			; $027E Cursor Row
+SCNMEM		= TAPEBUFFER+5			; $027F LO Pointer to Screen Buffer
+;		= TAPEBUFFER+6			; $0280 HI Pointer to Screen Buffer
 
 ;-- Details for LEFT Directory
-LDIRMEM		= TAPEBUFFER+5			; $027F LO LEFT Directory Buffer
-;		= TAPEBUFFER+6			; $0280 HI LEFT Directory Buffer
-LDIRTOP		= TAPEBUFFER+7			; $0281 LEFT Index of Top Entry
-LDIRSEL		= TAPEBUFFER+8			; $0282 LEFT Index of selected entry
-LDIREND		= TAPEBUFFER+9			; $0283 LEFT Index of Last Entry
+
+LDIRMEM		= TAPEBUFFER+10			; $0284 LO LEFT Directory Buffer
+;		= TAPEBUFFER+11			; $0285 HI LEFT Directory Buffer
+LDIRTOP		= TAPEBUFFER+12			; $0286 LEFT Index of Top Entry
+LDIRSEL		= TAPEBUFFER+13			; $0287 LEFT Index of Selected entry
+LDIRBOT		= TAPEBUFFER+14			; $0288 LEFT Index of Bottomd entry
+LDIREND		= TAPEBUFFER+15			; $0289 LEFT Index of Last Entry
 
 ;-- Details for RIGHT Directory
-RDIRMEM		= TAPEBUFFER+10			; $0284 LO RIGHT Directory Buffer
-;		= TAPEBUFFER+11			; $0285 HI RIGHT Directory Buffer
-RDIRTOP		= TAPEBUFFER+12			; $0286 RIGHT Index of Top Entry
-RDIRSEL		= TAPEBUFFER+13			; $0287 RIGHT Index of selected entry
-RDIREND		= TAPEBUFFER+14			; $0288 RIGHT Index of Last Entry
+
+RDIRMEM		= TAPEBUFFER+20			; $028E LO RIGHT Directory Buffer
+;		= TAPEBUFFER+21			; $028F HI RIGHT Directory Buffer
+RDIRTOP		= TAPEBUFFER+22			; $0290 RIGHT Index of Top Entry
+RDIRSEL		= TAPEBUFFER+23			; $0291 RIGHT Index of Selected entry
+RDIRBOT		= TAPEBUFFER+24			; $0292 RIGHT Index of Bottom entry
+RDIREND		= TAPEBUFFER+25			; $0293 RIGHT Index of Last Entry
+
+;-- Screen Buffer
 
 
 ;======================================================================================
@@ -110,22 +126,117 @@ Start:
 		JSR FindScnWidth		; Determine width of screen
 		
 		JSR DrawUI			; Draw the interface
-		JSR LoadLeftDir			; Load the LEFT directory
+		JSR LoadLeftDir			; Load the LEFT directory		
+;		JSR LoadRightDir		; Load the RIGHT directory
+;		JSR ShowRightDir		; Show the RIGHT directory
 		JSR ShowLeftDir			; Show the LEFT directory
-		JSR LoadRightDir		; Load the RIGHT directory
-		JSR ShowRightDir		; Show the RIGHT directory
 
 		JSR GetDiskStatus		; Get Disk Status
 
-		JSR AnyKey			; Wait for a key
+		JSR Interact			; The Main Code
+
+;		JSR AnyKey			; Wait for a key
 		JSR RestoreScreen		; Restore the screen
 		JSR RestoreCursorPos		; Restore cursor position
 BrowseDone:	RTS
 
-TestMsg1:	!PET "[start1]",13,0
-TestMsg2:	!PET "[start2]",13,0
-TestMsg3:	!PET "[initdone]",13,0
+;TestMsg1:	!PET "[test1]",13,0
+;TestMsg2:	!PET "[test2]",13,0
+;TestMsg3:	!PET "[test3]",13,0
 
+;======================================================================================
+; Interactive 
+;======================================================================================
+; This is the main code that runs to interact with the program features. It reads
+; keystrokes and acts on them, looping around until user exits.
+
+Interact:
+		JSR GETIN			; Get keystroke to .A
+		BEQ Interact			; No press, go back
+
+		STA SCREEN_RAM			; DEBUG!!!!!!!!!!!!!!!!!!
+
+		CMP #88				; Is it <X>?
+		BEQ IDone			; Yes, Exit!
+		CMP #17				; Is it <DOWN>?
+		BEQ IsDown			;
+		CMP #145			; Is it <UP>?
+		BEQ IsUp			;
+		CMP #19				; Is it <HOME>?
+		BEQ IsHome			;
+		CMP #32				; Is it <SPACE>?
+		BEQ IsSpace
+		JMP Interact			; Loop back for more
+
+IRefresh:	JSR ShowDirectory		; Re-draw Directory
+ILoop:		JMP Interact			; Loop back for more
+		
+
+IDone:		RTS				; Exit!
+
+;-------------- Perform UP
+
+IsUp:		LDY DTOP			; TOP Entry
+		CPY #0				; Is it at the TOP?
+		BEQ ILoop			; Yes, can't go up. abort.
+		LDY DSEL			; SELECTED Entry
+		CPY DTOP			; Is it at TOP?
+		BNE IsUp2			; No, It can move up, skip ahead
+		DEC DTOP			; Yes, Move Top UP
+IsUp2		DEC DSEL			; Move Selected Up
+		JSR DScrollDOWN			; Do Scroll DOWN
+		JMP IRefresh			; Refresh
+
+;-------------- Perform DOWN		
+
+IsDown:		LDY DSEL			; SELECTED entry
+		CMP DEND			; Is is equal to END entry
+		BEQ ILoop			; Yes, can't go down. abort.
+		INY				; Move it down
+		STY DSEL			; Save it
+		CPY DBOT			; Is it at the BOTTOM?
+		BNE IsDown2			; No, skip ahead
+		INC DTOP			; Yes, Move the TOP down
+		JSR DScrollUP			; Do Scroll UP
+IsDown2:	JMP IRefresh
+
+;-------------- Perform
+
+IsHome:		LDY #0				; First Entry
+		STY DTOP			; Set TOP
+		STY DSEL			; Set SELECTED
+		JMP IRefresh
+
+;-------------- Perform
+
+IsSpace:
+
+
+;-------------- We are lost
+
+		JMP IRefresh
+
+;-------------- Directory Scrolling
+DScrollUP:	JSR TopToPointer		; Load the Work Pointers
+		SBC #DIRLENGTH			; Subtract entry length
+		STA ZP3				; Store it
+		BCC DScrollX			; Did it cross the page?
+		DEC ZP3+1			; Page cross
+		RTS
+
+DScrollDOWN:	JSR TopToPointer
+		ADC #DIRLENGTH			; Add entry length
+		STA ZP3				; Store it
+		BCC DScrollX			; Did it cross the page?
+		INC zP3+1
+		RTS
+TopToPointer:
+		LDA DTOPMEM+1			; HI DTOP Memory Address
+		STA ZP3+1			; HI Store in Work Pointer
+		LDA DTOPMEM			; LO DTOP Memory Address
+		STA ZP3				; LO Store in Work Pointer
+		CLC				; Prep for Add or Subtract
+DScrollX	RTS				; Return with LO in .A
 
 ;======================================================================================
 ; Init Stuff
@@ -195,6 +306,7 @@ SetDirMem:	STY DMEM			; LO Pointer for Dir Memory
 
 ShowDirectory:	LDY DTOP			; Top Entry
 		STY DENTRY			; Make it Current Entry
+
 		LDY #0				; Count=1 (first entry displayed)
 		STY DCOUNT			; Entry Counter
 
@@ -227,6 +339,7 @@ SDnext:		LDA ZP3				; LO Work Pointer
 
 SDNext:		INC DCOUNT			; Next Entry#
 		LDA DCOUNT			; Get it again
+		STA DBOT			; Set as BOTTOM (temporarily)
 		CMP #DIRHEIGHT			; Is it at end of box?
 		BEQ SDexit			; Yes, exit
 		CMP DEND			; Is it at the end of the directory?
@@ -699,32 +812,16 @@ RestoreCursorPos:
 ;======================================================================================
 ; DRAW UI
 ;======================================================================================
-; Draw Titlebar, box for the filenames and key help line
+; Draw Program Info and key help line
 
-DrawUI:		LDA #<TitleBar				
-		LDY #>TitleBar
-		JSR STROUTZ			; Print the titlebar
+DrawUI:		JSR $E015			; Clear Screen
+		LDA #<ProgInfo				
+		LDY #>ProgInfo
+		JSR PrintAt			; Print Program Info
 
-		LDA #<DirBox1
-		LDY #>DirBox1
-		JSR STROUTZ			; Print top line
-
-		LDA #DIRHEIGHT-1		; Height of Dir Box
-		STA ZP1				; Save it
-
-DUILoop:	LDA #<DirBox2
-		LDY #>DirBox2
-		JSR STROUTZ			; Print middle line
-		DEC ZP1				; Decrement Counter
-		BNE DUILoop			; Go back for more
-
-DUIBottom:	LDA #<DirBox3
-		LDY #>DirBox3
-		JSR STROUTZ			; Print bottom line
-
-DUIBar:		LDA #<KeyBar				
+		LDA #<KeyBar				
 		LDY #>KeyBar
-		JSR PrintAt			; Print key bar line
+		JSR PrintAt			; Print Key Bar
 		RTS
 
 ;======================================================================================
@@ -733,22 +830,14 @@ DUIBar:		LDA #<KeyBar
 
 ;-------------- User Interface
 
-TitleBar:	!PET 147,0
-DirBox1:	!BYTE $B0					; Top Left Corner
-		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
-		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
-		!BYTE $AE,13,0					; Top Right Corner, CR
-DirBox2:	!PET  $DD,"                    ",$DD,13,0	; Centre line
-DirBox3:	!BYTE $AD					; Bottom Left Corner
-		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
-		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
-		!BYTE $BD,13,0					; Bottom Right Corner, CR
-
-KeyBar:		!BYTE 21,0					; ROW=22,COL=0
-		!PET "stevebrowse 2021-04-08  " 
-		!PET 18,"up/dn",146,"=sel,"
-		!PET 18,"return",146,"=run/cd, "
-		!PET 18,"r",146,"=root",19,13,0			; Keys <home> - NO CR
+ProgInfo:	!BYTE 21,0					; ROW=22,COL=0
+		!PET  "stevebrowse 2021-04-09  " 		; title text
+KeyBar:		!BYTE 22,0					; ROW=23,COL=0
+		!PET  RVS,"crsr",  ROFF,"sel "			; cursor
+		!PET  RVS,"return",ROFF,"run/cd "		; return
+		!PET  RVS,"home",  ROFF,"top "			; home
+		!BYTE RVS,94,      ROFF				; UPARROW
+		!PET  "root",0					; 
 
 ;-------------- 
 HomeHome:	!BYTE 19,19,147,17,0				; <HOME><HOME><CLS><DOWN>
@@ -756,13 +845,13 @@ FNDir0:		!PET "$0",0					; Directory string
 FNDir1:		!PET "$1",0					; Directory string
 
 AreUSure:	!PET "are you sure (y/n)?",0
-ReadingDir:	!PET "reading directory...",0		
-DirLoaded:	!PET 146,"directory entries:",0
+ReadingDir:	!PET "reading...",0		
+DirLoaded:	!PET 146,"# of entries:",0
 Copying		!PET "copying...",0
 Renaming:	!PET "renaming...",0
 
 ;======================================================================================
-; Init Stuff
+; Keyboard Command Dispatch
 ;======================================================================================
 
 ;-------------- Keyboard Command Bytes
@@ -790,12 +879,6 @@ KeyCopy:
 KeyQuit:
 		RTS
 
-;-------------- Misc Strings
-
-ProgStart	!PET ">>> ",0					; DEBUG Start of Sub 
-ProgMarker	!PET "!",0					; DEBUG Marker
-
-;-------------- DEBUG Strings
 
 ;======================================================================================
 ; SCREEN LINE ADDRESS TABLE
