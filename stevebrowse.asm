@@ -21,6 +21,11 @@ BACKACTION	= 0
 !SOURCE "memzeropage.asm"			; Zero Page locations
 
 PRINT		= $FFD2				; Print a character routine
+CLEARSCREEN	= $E015				; Clear the screen
+
+;-------------- Program Options
+
+SCREENSAVE	= 0				; Include Screen Save Options
 
 ;-------------- Constants
 
@@ -142,9 +147,12 @@ RSELMEM		= RIGHTMEM+6			; RIGHT LO Selected Item Memory
 *=$A000			; Put this in the $A Option ROM - SYS40960
 
 Start:
+
 		JSR InitStuff			; Do some intialization stuff
+!IF SCREENSAVE=1 {
 		JSR SaveCursorPos		; Save cursor position
 		JSR SaveScreen			; Save the screen to memory
+}
 		JSR FindScnWidth		; Determine width of screen
 		
 		JSR DrawUI			; Draw the interface
@@ -172,8 +180,8 @@ BrowseDone:	RTS				; Exit Program
 ;-------------- Command Key Table and Address Lo/HI Tables
 ;       	KEY:   Q     , DOWN  , UP  , HOME  , SPACE  , <     , >     , /      , CLS  , RETURN  ,NULL
 CMDTABLE:	!BYTE  81    , 17    , 145 , 19    , 32     , 62    , 60    , 47     , 147  , 13      ,0
-CMDLO:		!BYTE <IsExit,<IsDown,<IsUp,<IsHome,<IsSpace,<IsPgDn,<IsPgUp,<IsSlash,<IsCLS,<IsRETURN
-CMDHI:		!BYTE >IsExit,>IsDown,>IsUp,>IsHome,>IsSpace,>IsPgDn,>IsPgUp,>IsSlash,>IsCLS,>IsRETURN
+CMDLO:		!BYTE <IsQuit,<IsDown,<IsUp,<IsHome,<IsSpace,<IsPgDn,<IsPgUp,<IsSlash,<IsCLS,<IsRETURN
+CMDHI:		!BYTE >IsQuit,>IsDown,>IsUp,>IsHome,>IsSpace,>IsPgDn,>IsPgUp,>IsSlash,>IsCLS,>IsRETURN
 
 ;-------------- Interactive Dispatch
 Interact:
@@ -210,8 +218,13 @@ ILoop:		JMP Interact			; Loop back for more
 ILoopStat:	JSR ClearMsg			; Clear Status Line
 		JMP Interact
 
-ShowPET:	JSR RestoreScreen		; Restore the screen
+ShowPET:
+!IF SCREENSAVE=1{
+		JSR RestoreScreen		; Restore the screen
 		JSR RestoreCursorPos		; Restore cursor position
+} ELSE {
+		JSR CLEARSCREEN			; Clear the screen
+}
 		RTS
 
 ;======================================================================================
@@ -220,7 +233,7 @@ ShowPET:	JSR RestoreScreen		; Restore the screen
 
 ;-------------- Exit Program
 
-IsExit:		JSR AskSure			; Prompt to Exit
+IsQuit:		JSR AskSure			; Prompt to Exit
 		CMP #89				; Is it "Y"?
 		BNE ILoopStat			; No, continue
 		JMP ShowPET			; Yes, Restore screen, cursor, then Exit!
@@ -359,28 +372,26 @@ IsRETURN:
 
 ;-------------- Do File Load
 
-LoadPRG:	LDA #<LoadPrompt		; point to prompt
-		LDY #>LoadPrompt		
-		JSR AskSure			; Are you sure?
-		BNE LPgo
+LoadPRG:	LDY #1		
+		JSR PrintNM			; Are you sure?
+		CMP #89				; Is it "Y"?
+		BEQ LPgo			; Yes
 		JMP ILoopStat
 
-LPgo:		LDA #<DLoadPrep			; Pre-filename string <CLS>dL<QUOTE>
-		LDY #>DLoadPrep
-		JSR STROUTZ			; Print the string
+LPgo:		LDY #10				; Pre-filename string <CLS>dL<QUOTE>
+		JSR PrintNM			; Print the string
 		LDA #34				; <QUOTE>
-		JSR $FFD2			; Print it
+		JSR PRINT			; Print it
  	
 		LDY #1				; First character after quote
 LPloop:		LDA (DSELMEM),Y			; Get character
 		INY				; move ahead
-		JSR $FFD2			; Print it
+		JSR PRINT			; Print it
 		CMP #34				; Is it <QUOTE>?		
 		BNE LPloop			; No, loop back for more
 
-LPpost:		LDA #<DLoadPost			; Post-filename string <QUOTE>,D0 ON U8<CR><CR>
-		LDY #>DLoadPost
-		JSR STROUTZ			; Print the string
+LPpost:		LDY #11				; Post-filename string <QUOTE>,D0 ON U8<CR><CR>
+		JSR PrintNM			; Print the string
 
 		LDA #19				; Home
 		STA $026F			; First byte of keyboard buffer
@@ -425,9 +436,8 @@ SetDZX:		RTS
 ;======================================================================================
 ; Prompt for Drive Device Number. Accepts 0-9 or STOP=Abort. 0-7 are treated as 10-17.
 
-AskDevice:	LDA #<DevPrompt				; Point to Prompt
-		LDY #>DevPrompt
-		JSR PrintMsg				; Print the message
+AskDevice:	LDY #3					; Point to Prompt
+		JSR PrintMsgNM				; Print the message
 AskDloop	JSR AnyKey				; Get ANY Key		
 		CMP #3					; Is it Stop
 		BEQ AskAbort				; Yes, abort
@@ -447,9 +457,8 @@ NoAdj:		SBC #48					; Subtract 48 - Device# in .A
 ;======================================================================================
 ; Prompt for Drive Unit Number. Accepts 0-1 or STOP=Abort
 
-AskUnit:	LDA #<UnitPrompt			; Point to Prompt
-		LDY #>UnitPrompt
-		JSR PrintMsg				; Print the message
+AskUnit:	LDY #4					; Point to Prompt
+		JSR PrintNM				; Print the message
 AskUloop:	JSR AnyKey				; Get ANY Key		
 		CMP #3					; Is it Stop
 		BEQ AskAbort				; Yes, abort
@@ -470,9 +479,9 @@ AskAbort:	LDA #0					; Return a NULL
 ; Display confirmation then wait for ANY KEY - No validation done
 ; Answer returned in .A
 
-AskSure:	LDA #<YesNoPrompt			; Point to Prompt
-		LDY #>YesNoPrompt
-		JSR PrintMsg				; Print the Message
+AskSure:	JSR ClearMsg
+		LDY #2					; "Quit?"
+		JSR PrintMsgNM				; Print the Message
 AnyKey:		JSR GETIN				; Get keystroke to .A
 		BEQ AnyKey				; None, so loop back
 		RTS
@@ -561,7 +570,7 @@ SDSelection:	LDA #32				; Assume <SPACE> character
 		STA DSELMEM+1			; HI SELECTED memory pointer
 
 		LDA #62				; Yes, use ">" character
-SDpoint:	JSR $FFD2			; Print It!
+SDpoint:	JSR PRINT			; Print It!
 
 ;-------------- Check if Entry is Marked
 
@@ -606,75 +615,14 @@ SDexit:		DEC DBOT			; adjust
 
 
 ;======================================================================================
-; PRINT ROUTINES
-;======================================================================================
-; PrintAt:	Set .A=LO, .Y=HI address of string
-;		String:	First byte is ROW, second is COL, the rest is printed.
-; CursorAt:	Set .A=ROW, .Y=COL	- Positions cursor.
-; PrintMsg:	Set .A=LO, .Y=HI address of string
-; ClearMsg:	NONE			- Clears Status line with SPACES
-; ClearRow:	Set .A=ROW, 		- Clears the entire ROW with SPACE.
-; FillRow:	Set .A=ROW, .Y=CHR	- Clears the entire ROW with CHR.
-
-PrintAt:
-		STA ZP1					; Set LO
-		STY ZP1+1				; Set HI		
-		LDY #0					; Index at zero
-		LDA (ZP1),Y				; Get print ROW
-		STA CursorRow				; Set Cursor ROW
-		JSR IncZP1				; Advance pointer
-		LDA (ZP1),Y				; Get print COL
-		STA CursorCol				; Set Cursor COL
-		JSR IncZP1				; ZP1 now points to TEXT
-		JSR SetCursor				; Calculate cursor position
-
-		LDA ZP1					; LO
-		LDY ZP1+1				; HI
-		JMP STROUTZ				; Print it!
-
-CursorAt:	STA CursorRow				; Set ROW
-		STY CursorCol				; Set COL
-		JSR SetCursor				; Position Cursor
-		RTS
-
-PrintMsg:	PHA					; Save .A and .Y
-		TYA					; onto stack
-		PHA
-		JSR ClearMsg				; Clear the Status Line
-		LDA #MSGROW				; Message ROW
-		LDY #0					; Column=0
-		JSR CursorAt				; Position cursor
-		PLA					; Bring back pointer to string
-		TAY
-		PLA
-		JMP STROUTZ				; Print the string
-
-ClearMsg:	LDA #MSGROW				; Message ROW
-ClearRow:	LDY #32					; <SPACE>
-FillRow:	JSR CursorAt				; Set the cursor
-		LDA CursorCol				; Put CHR to A
-		LDY #0					; Start Counter at cursor pos
-ClearRloop:	STA (ScrPtr),Y				; Write character to screen
-		INY					; Next position
-		CPY SCNWID				; Is it end of line?
-		BNE ClearRloop				; No, go back for more
-		RTS
-
-
-
-;MyPrint:	STA ZP2
-;		STY ZP2+1
-
-
-;======================================================================================
 ; SET CURSOR
 ;======================================================================================
 ; Uses CursorRow to set Screen line pointer ScrPtr for printing.
-; CursorCol is used as offset
-; Messes up all registers
-; We should be able to replace this routine when integrating with Editrom!
+; CursorCol is used as offset. Messes up .A and .X registers
+; ****We should be able to replace this routine when integrating with Editrom!
 
-SetCursor:
+SetCursor:	TYA
+		PHA
 		LDY CursorRow				; Get ROW as index
 		LDA SCNWID				; Check Screen Width
 		CMP #80					; Is it 80?
@@ -689,7 +637,9 @@ SetC80:		LDA SLA80_Lo,Y				; Get LO from Table
 
 SetCAX:		STA ScrPtr				; Store in ScrPrt LO
 		STX ScrPtr+1				; Store in ScrPrt HI
-SetCDone:	RTS
+SetCDone:	PLA
+		TAY
+		RTS
 
 
 ;**************************************************************************************
@@ -817,9 +767,8 @@ LoadDirectory:
 		LDA #1				; Make entry after header SELECTED
 		STA DSEL			; Index of Selected Entry
   
-		LDA #<ReadingDir		; Print "Reading.."
-		LDY #>ReadingDir
-		JSR PrintMsg
+		LDY #6				; Print "Reading.."
+		JSR PrintMsgNM
 
 		LDY #2				; Length=2 "$0" or "$1" DEBUG!!!!!!!!!!!!!
 		STY FNLEN			; Save it
@@ -904,9 +853,8 @@ Entry_done:	LDA DCOUNT			; Get Counter
 ;-------------- Listing is complete
 
 StopListing:	JSR CLSEI			; close file with $E0, unlisten
-		LDA #<DirLoaded
-		LDY #>DirLoaded		
-		JSR PrintMsg
+		LDY #5		
+		JSR PrintNM
 		LDA #0				; HI # of entries = 0
 		JSR INTOUT			; write #blocks to screen
 		RTS
@@ -951,14 +899,15 @@ IncZP1X:	RTS
 
 InitStuff:	LDX #0				; Make our data start on page boundry
 		STX ACTIVE			; Active Directory Listing (0/1)
-;		STX CLMARGIN			; Cursor Left Margin
-
 		LDX STREND+1			; HI End of Arrays
-		INX				; Start on boundty of next page
-		STX SCNMEMHI			; HI Screen Save Buffer
+		INX				; Start on boundry of next page
 		TXA
 		CLC
+
+!IF SCREENSAVE=1 {
+		STX SCNMEMHI			; HI Screen Save Buffer
 		ADC #8				; Reserve 8 pages for 80-col screen
+}
 		STA LDIRMEMHI			; HI LEFT Directory Buffer
 		ADC #24				; Reserve 24 pages (6K) for LEFT Dir
 		STA RDIRMEMHI			; HI RIGHT Directory Buffer
@@ -976,10 +925,8 @@ InitStuff:	LDX #0				; Make our data start on page boundry
 ; LO byte equal to 40 or 80 (points to $8028 or $8050).
 ; *** We can probably eliminate this when integrated into Editrom!
 
-FindScnWidth:
-		LDA #<HomeHome			; Address of string to print
-		LDY #>HomeHome
-		JSR STROUTZ			; Use standard system print routine
+FindScnWidth:	LDY #1
+		JSR PrintNM			; Use standard system print routine
 		LDA ScrPtr			; LO of Start of Line Address
 		STA SCNWID			; Save it
 		RTS
@@ -1028,6 +975,7 @@ CopyLoop:	LDA (ZP1),Y			; Read byte
 		BNE CopyLoop			; Back for more		
 		RTS
 
+!IF SCREENSAVE=1 {
 ;======================================================================================
 ; SAVE/RESTORE CURSOR
 ;======================================================================================
@@ -1053,62 +1001,124 @@ RestoreCursorPos:
 		LDA SCNSAVE4
 		STA CursorRow
 		RTS
+}
 
 ;======================================================================================
 ; DRAW UI
 ;======================================================================================
 ; Draw Program Info and key help line
 
-DrawUI:		JSR $E015			; Clear Screen
-		LDA #<ProgInfo				
-		LDY #>ProgInfo
-		JSR PrintAt			; Print Program Info
+DrawUI:		JSR CLEARSCREEN			; Clear Screen
+		LDX #PROGROW			; Program Info ROW
+		LDY #14				; Message#
+		JSR PrintRowNM			; Print Program Info
 
-		LDA #HELPROW-1			; Row 23
-		LDY #104				; Horizontal line chr
+		LDX #HELPROW-1			; Row 23
+		LDY #104			; Horizontal line chr
 		JSR FillRow			; Fill the row with 
-		LDA #<KeyBar				
-		LDY #>KeyBar
-		JSR PrintAt			; Print Key Bar
+
+		LDX #HELPROW
+		LDY #12				; Key Command Bar
+		JSR PrintRowNM			; Print Key Bar
 		RTS
 
 ;======================================================================================
 ; DATA TABLES
 ;======================================================================================
 
-;-------------- User Interface
-
-ProgInfo:	!BYTE PROGROW,0				; Message ROW
-		!PET  "stevebrowse 2021-04-12",0 		; Title text
 KeyBar:		!BYTE HELPROW,0					; HELP ROW
-		!PET  RVS,"cls"   ,ROFF,"drive "		; Select Drive
-		!PET  RVS,"/"     ,ROFF,"switch "		; Switch Sides
-		!PET  RVS,"crsr"  ,ROFF,"sel "			; Cursor
-		!PET  RVS,"home"  ,ROFF,"top "			; Home
-		!PET  RVS,"<>"    ,ROFF,"page "			; Page Up/Down
-		!PET  RVS,"spc"   ,ROFF,"mark "			; Space
-		!PET  RVS,"rtn"   ,ROFF,"run/cd "		; Return
-		!PET  RVS,"q"     ,ROFF,"quit",0		; Quit
-;-------------- 
-HomeHome:	!BYTE 19,19,147,17,0				; <HOME><HOME><CLS><DOWN>
+
 FNDir0:		!PET "$0",0					; Directory string
 FNDir1:		!PET "$1",0					; Directory string
 
-YesNoPrompt:	!PET "are you sure (y/n)?",0
 
-DevPrompt:	!PET "device# (",RVS,"8",ROFF," ",RVS,"9",ROFF
-		!PET " 1",RVS,"0",ROFF," 1",RVS,"1",ROFF," 1",RVS,"2",ROFF,")?",0
+;======================================================================================
+; PRINT ROUTINES
+;======================================================================================
+; CursorAt:	.A=ROW, .Y=COL			Positions cursor.
+; PrintMsg:	.A=LO,  .Y=HI addr of string
+; ClearMsg:	NONE				Clears Status line with SPACES
+; ClearRow:	.A=ROW, 			Clears the entire ROW with SPACE.
+; FillRow:	.A=ROW, .Y=CHR			Clears the entire ROW with CHR.
 
-UnitPrompt:	!PET "unit (0,1)?",0
+;-------------- Numbered Message Print Routines
 
-DirLoaded:	!PET 146,"# of entries:",0
-ReadingDir:	!PET "reading",0
-Copying		!PET "copying...",0
-Renaming:	!PET "renaming...",0
+; PrintMsgNM:   .Y=Msg#, Row=MSGROW, Col=0	Print Message on MSGROW
+; PrintRowNM:	.Y=Msg#, .X=Row#,    Col=0	Print String# at Row,0
+; PrintAtNM:	.Y=Msg#, .X=Row#,    .A=Col#	Print String# at Row,Col
+; PrintNM:	.Y=Msg#, at Cursor Position	Print String#
 
-LoadPrompt:	!PET "load program (y/n)?",0			; Load prompt
-DLoadPrep:	!PET 147,"dL",0					; <CLS>dL<QUOTE> - Pre-filename
-DLoadPost:	!PET ",d0,u8",0					; d0,u8          - Post-filename
+CursorAt:	STA CursorRow			; Set ROW
+		STY CursorCol			; Set COL
+		JSR SetCursor			; Position Cursor
+		RTS
+
+ClearMsg:	LDA #MSGROW			; Message ROW
+ClearRow:	LDY #32				; <SPACE>
+FillRow:	JSR CursorAt			; Set the cursor
+		LDA CursorCol			; Put CHR to A
+		LDY #0				; Start Counter at cursor pos
+ClearRloop:	STA (ScrPtr),Y			; Write character to screen
+		INY				; Next position
+		CPY SCNWID			; Is is end of line? 
+		BNE ClearRloop			; No, go back for more
+		RTS
+ 
+PrintMsgNM:	LDX #MSGROW			; Status Row
+PrintRowNM:	LDA #0				; Col=0
+PrintAtNM:	STA CursorCol			; Set COL
+		STX CursorRow			; Set ROW
+		JSR SetCursor			; Position Cursor
+		
+PrintNM:	LDA NMOffset,Y			; Get Offset
+		TAY				; put in .Y
+		LDA #<NMS			; LO
+		STA ZP2				; LO Pointer
+		LDA #>NMS			; HI
+		STA ZP2+1			; Hi Pointer
+PNMloop		LDA (ZP2),Y			; Get the character to print
+		CMP #0				; End of String?
+		BEQ PNMexit			; Yes,done
+		JSR PRINT			; No, print it
+		INY				; next character
+		JMP PNMloop			; loop for more
+PNMexit:	RTS
+
+;-------------- Numbered Message Strings
+
+NMOffset:	!BYTE NM0-NMS,NM1-NMS,NM2-NMS,NM3-NMS		; 0-3
+		!BYTE NM4-NMS,NM5-NMS,NM6-NMS,NM7-NMS		; 4-7
+		!BYTE NM8-NMS,NM9-NMS,NM10-NMS,NM11-NMS		; 8-11
+		!BYTE NM12-NMS,NM13-NMS,NM14-NMS		; 12-14
+
+NMS:								; Start of Numbered Message String Area
+
+NM0:	!BYTE 0							; For print@ 
+NM1:	!BYTE 19,19,147,17,0					; <HOME><HOME><CLS><DOWN>
+NM2:	!PET "quit?",0					
+NM3:	!PET "device# (",RVS,"8",ROFF," ",RVS,"9",ROFF
+	!PET " 1",RVS,"0",ROFF," 1",RVS,"1",ROFF," 1",RVS,"2",ROFF,")?",0
+
+NM4:	!PET "unit (0,1)?",0
+NM5:	!PET 146,"# of entries:",0
+NM6:	!PET "reading",0
+NM7:	!PET "copying...",0
+NM8:	!PET "renaming...",13,0
+NM9:	!PET "load prg?",0			; Load prompt
+NM10:	!PET 147,"dL",0				; <CLS>dL<QUOTE> - Pre-filename
+NM11:	!PET ",d0,u8",0				; d0,u8          - Post-filename
+
+NM12:	!PET  RVS,"cls"   ,ROFF,"drive "	; Select Drive
+	!PET  RVS,"/"     ,ROFF,"switch "	; Switch Sides
+	!PET  RVS,"crsr"  ,ROFF,"sel "		; Cursor
+	!PET  RVS,"home"  ,ROFF,"top "		; Home
+	!PET  RVS,"<>"    ,ROFF,"page "		; Page Up/Down
+	!PET  RVS,"spc"   ,ROFF,"mark "		; Space
+	!PET  RVS,"rtn"   ,ROFF,"run/cd "	; Return
+	!PET  RVS,"q"     ,ROFF,"quit",0	; Quit
+
+NM13:	!PET " are you sure (y/n)?",0		; Are you Sure?
+NM14:	!PET "stevebrowse 2021-04-13",0 			; Title text
 
 ;======================================================================================
 ; SCREEN LINE ADDRESS TABLE
