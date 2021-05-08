@@ -35,7 +35,11 @@ IDFLAG		= 0				; Flag to add ID string
 MYDRIVE		= 8				; Default Drive Number, ie: 8
 DRIVEUNIT	= 0				; Default Unit Numberm ie: 0 or 1
 DRECLEN		= 23				; Record length for ram directory
-STATUSROW	= 23				; Location of status row
+
+DSROW		= 22				; Location of Disk Status ROW
+MSGROW		= 23				; Location of Info Status ROW
+HELPROW		= 24				; Location of HELP keys   ROW
+
 RVS		= 18				; <RVS>
 ROFF		= 146				; <OFF>
 
@@ -80,6 +84,10 @@ ZP2		= $F0				; Dest Pointer - Scn Cpy
 ZP3		= $F2				; Work Pointer - Directory display
 
 ;-------------- Memory Locations
+; These locations should eventually move to BASIC program space so that ML code
+; that uses the tape buffer will work.
+; TODO: instead of copying individual bytes we should copy the entire block for
+;       LEFT or RIGHT to/from ZP locations for current DIR memory.
 
 TAPEBUFFER      = $027A				; 634   Tape buffer
 
@@ -92,7 +100,8 @@ SCNMEM		= TAPEBUFFER+4			; $027F LO Pointer to Screen Buffer
 CMDMEM		= TAPEBUFFER+6			; $0281 LO Command String Buffer Pointer
 ;		= TAPEBUFFER+7			; $0282 HI
 
-;-- Details for LEFT Directory
+;-- Details for LEFT/RIGHT Directory
+; These locations must match the ones in Zero Page (starting from DMEM)
 
 LDIRMEM		= TAPEBUFFER+10			; $0284 LO LEFT Directory Buffer
 ;		= TAPEBUFFER+11			; $0285 HI LEFT Directory Buffer
@@ -102,8 +111,6 @@ LDIRTOP		= TAPEBUFFER+14			; $0288 LEFT Index of Top Entry
 LDIRSEL		= TAPEBUFFER+15			; $0289 LEFT Index of Selected entry
 LDIRBOT		= TAPEBUFFER+16			; $028A LEFT Index of Bottomd entry
 LDIREND		= TAPEBUFFER+17			; $028B LEFT Index of Last Entry
-
-;-- Details for RIGHT Directory
 
 RDIRMEM		= TAPEBUFFER+20			; $028E LO RIGHT Directory Buffer
 ;		= TAPEBUFFER+21			; $028F HI RIGHT Directory Buffer
@@ -119,8 +126,8 @@ RDIREND		= TAPEBUFFER+27			; $0293 RIGHT Index of Last Entry
 ; START OF PROGRAM CODE
 ;======================================================================================
 
-!TO "sb.bin",plain				; Output filename without Load Address
-*=$A000						; Put this in the $A Option ROM
+!TO "sb.bin",plain	; Output filename without Load Address
+*=$A000			; Put this in the $A Option ROM - SYS40960
 
 Start:
 		JSR InitStuff			; Do some intialization stuff
@@ -173,6 +180,11 @@ Interact:
 		BEQ IsHome			;
 		CMP #32				; Is it <SPACE>?
 		BEQ IsSpace
+		CMP #62				; Is it ">"?
+		BEQ IsPgDn
+		CMP #60				; Is it ">"?
+		BEQ IsPgUp
+
 		JMP Interact			; Loop back for more
 
 IRefresh:	JSR ShowDirectory		; Re-draw Directory
@@ -230,12 +242,6 @@ IsHome:		LDY #0				; First Entry
 
 IsSpace:	LDA DSEL			; Is SELECTED zero? (header)
 		BEQ ILoop			; Yes, abort
-		INC SCREEN_RAM+200		; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!
-		
-;		LDA #95
-;		LDY #18
-;		STA (SELMEM),Y
-;		JMP IRefresh
 
 		LDY #18				; Index for MARK character
 		LDX #32				; Assume we need to de-Select
@@ -247,6 +253,22 @@ IsSpaceX:	TXA
 		STA (SELMEM),Y			; Write <BACKARROW> to entry
 		JMP IRefresh
 
+IsPgDn:		LDA ZP3				; LO Work Pointer
+		CLC
+		ADC #$CC			; DRECLEN*DIRHEIGHT=460= $1CC
+		STA ZP3
+		LDA ZP3+1			; HI Work Pointer
+		ADC #1
+		STA ZP3+1			; HI Work Pointer
+; todo: check for past END!
+		LDA DTOP
+		ADC #DIRHEIGHT
+		STA DTOP			; Directory TOP
+		STA DSEL			; SELECTED entry
+		JMP IRefresh
+
+IsPgUp:
+		
 ;-------------- We are lost
 
 		JMP IRefresh
@@ -470,7 +492,7 @@ SDexit:		DEC DBOT
 ; PrintAt:	Set .A=LO, .Y=HI address of string
 ;		String:	First byte is ROW, second is COL, the rest is printed.
 ; CursorAt:	Set .A=ROW, .Y=COL	- Positions cursor.
-; ClearStatus:	NONE			- Clears Status line with SPACES
+; ClearMsg:	NONE			- Clears Status line with SPACES
 ; ClearRow:	Set .A=ROW, 		- Clears the entire ROW with SPACE.
 ; FillRow:	Set .A=ROW, .Y=CHR	- Clears the entire ROW with CHR.
 
@@ -495,11 +517,11 @@ CursorAt:	STA CursorRow				; Set ROW
 		JSR SetCursor				; Position Cursor
 		RTS
 
-SetStatus:	PHA					; Save .A and .Y
+SetMsg:	PHA					; Save .A and .Y
 		TYA					; onto stack
 		PHA
-		JSR ClearStatus				; Clear the Status Line
-		LDA #STATUSROW				;
+		JSR ClearMsg				; Clear the Status Line
+		LDA #MSGROW				;
 		LDY #0
 		JSR CursorAt				; Position cursor
 		PLA					; Bring back pointer to string
@@ -507,7 +529,7 @@ SetStatus:	PHA					; Save .A and .Y
 		PLA
 		JMP STROUTZ				; Print the string
 
-ClearStatus:	LDA #STATUSROW				; Row where status messages printed		
+ClearMsg:	LDA #MSGROW				; Message ROW
 ClearRow:	LDY #32					; <SPACE>
 FillRow:	JSR CursorAt
 		LDA CursorCol				; Put CHR to A
@@ -599,7 +621,7 @@ SENDCMDDONE	JSR UNLSN			; un-listen
 ; Read the status string: ##,String,TT,SS
 
 GetDiskStatus:
-		LDA #24
+		LDA #DSROW			; Disk Status ROW
 		LDY #0
 		JSR CursorAt
 		LDA MYDRIVE			; Current Device#
@@ -683,7 +705,7 @@ LoadDirectory:
   
 		LDA #<ReadingDir		; Print "Reading.."
 		LDY #>ReadingDir
-		JSR SetStatus
+		JSR SetMsg
 
 		LDY #2				; Length=2 "$0" or "$1"
 		STY FNLEN			; Save it
@@ -769,7 +791,7 @@ Entry_done:	LDA DCOUNT			; Get Counter
 StopListing:	JSR CLSEI			; close file with $E0, unlisten
 		LDA #<DirLoaded
 		LDY #>DirLoaded		
-		JSR SetStatus
+		JSR SetMsg
 		LDX DCOUNT			; LO # of entries = DCOUNT
 		STX DEND			; save as END
 		LDA #0				; HI # of entries = 0
@@ -949,9 +971,9 @@ DrawUI:		JSR $E015			; Clear Screen
 
 ;-------------- User Interface
 
-ProgInfo:	!BYTE 21,0					; ROW=22,COL=0
-		!PET  "stevebrowse 2021-04-10",0 		; title text
-KeyBar:		!BYTE 22,0					; ROW=23,COL=0
+ProgInfo:	!BYTE MSGROW-1,0				; Message ROW
+		!PET  "stevebrowse 2021-04-11",0 		; Title text
+KeyBar:		!BYTE HELPROW,0					; HELP ROW
 		!PET  RVS,"crsr",  ROFF,"sel "			; cursor
 		!PET  RVS,"home",  ROFF,"top "			; home
 		!PET  RVS,"space",  ROFF,"mark "		; space
