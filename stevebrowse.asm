@@ -14,87 +14,87 @@ ESCCODES	= 0
 BACKARROW	= 0
 BACKACTION	= 0
 
-!SOURCE "membasic4.asm"				; BASIC calls
-!SOURCE "memchips.asm"				; IO Chips
-!SOURCE "memkernal.asm"				; KERNAL calls
-!SOURCE "memlow.asm"				; Low Memory locations
-!SOURCE "memzeropage.asm"			; Zero Page locations
+!SOURCE "membasic4.asm"			; BASIC calls
+!SOURCE "memchips.asm"			; IO Chips
+!SOURCE "memkernal.asm"			; KERNAL calls
+!SOURCE "memlow.asm"			; Low Memory locations
+!SOURCE "memzeropage.asm"		; Zero Page locations
 
-PRINT		= $FFD2				; Print a character routine
-CLEARSCREEN	= $E015				; Clear the screen
+PRINT		= $FFD2			; Print a character routine
+CLEARSCREEN	= $E015			; Clear the screen
 
 ;-------------- Program Options
 
-SCREENSAVE	= 0				; Include Screen Save Options
+SCREENSAVE	= 0			; Include Screen Save Options
 
 ;-------------- Constants
 
-SCREENPAGES     = 8				; 2K size for 80 col
-DIRWIDTH        = 16				; Width of directory window
-DIRHEIGHT	= 20				; Height of directory window
-DIRROW		= 0				; Row for first directory line
-DIRCOL0		= 0				; Column for LEFT directory
-DIRCOL1		= 26				; Column for LEFT directory
-IDFLAG		= 0				; Flag to add ID string
-MYDRIVE		= 8				; Default Drive Number, ie: 8
-DRIVEUNIT	= 0				; Default Unit Numberm ie: 0 or 1
-DRECLEN		= 23				; Record length for ram directory
+SCREENPAGES     = 8			; 2K size for 80 col
+DIRWIDTH        = 16			; Width of directory window
+DIRHEIGHT	= 20			; Height of directory window
+DIRROW		= 0			; Row for first directory line
+DIRCOL0		= 0			; Column for LEFT directory
+DIRCOL1		= 26			; Column for LEFT directory
+IDFLAG		= 0			; Flag to add ID string
+MYDRIVE		= 8			; Default Drive Number, ie: 8
+DRIVEUNIT	= 0			; Default Unit Numberm ie: 0 or 1
+DRECLEN		= 23			; Record length for ram directory
 
-DEBUGRAM	= SCREEN_RAM+24*80+70		; Address  of Debug       ROW
+DEBUGRAM	= SCREEN_RAM+24*80+70	; Address  of Debug       ROW
 
-PROGROW		= 20				; Location of Progress    ROW
-DSROW		= 21				; Location of DiskST/File ROW
-MSGROW		= 22				; Location of Info Status ROW
-HELPROW		= 24				; Location of HELP keys   ROW
+PROGROW		= 20			; Location of Progress    ROW
+DSROW		= 21			; Location of DiskST/File ROW
+MSGROW		= 22			; Location of Info Status ROW
+KEYROW		= 24			; Location of HELP keys   ROW
 
-RVS		= 18				; <RVS>
-ROFF		= 146				; <OFF>
+RVS		= 18			; <RVS>
+ROFF		= 146			; <OFF>
 
 ;======================================================================================
 ; PROGRAM STORAGE LOCATIONS
 ;======================================================================================
 ; $B1-$C3 used for TAPE. Safe to use here for now?
 
-;ScrPtr		= $c4				; LO Pointer to character screen line
-;		= $c5				; HI Pointer to character screen line
-;CursorCol	= $c6				; Cursor COL - Position of cursor on above line
-;CursorRow	= $d8				; Cursor ROW
-;STROUTZ	= $bb1d				; A=LSB, Y=MSB			; BASIC4 STROUTZ is broken!
-;STROUT		= $bb24				; X=len, STRADR=ptr
+;ScrPtr		= $c4			; LO Pointer to character screen line
+;		= $c5			; HI Pointer to character screen line
+;CursorCol	= $c6			; Cursor COL - Position of cursor on above line
+;CursorRow	= $d8			; Cursor ROW
+;STROUTZ	= $bb1d			; A=LSB, Y=MSB			; BASIC4 STROUTZ is broken!
+;STROUT		= $bb24			; X=len, STRADR=ptr
 
 
-ACTIVE		= $B1				; Active Directory# 0 or 1
-SCNWID		= $B2				; Current Screen Width 
-;CLMARGIN	= $B3				; Cursor LEFT Margin
+ACTIVE		= $B1			; Active Directory# 0 or 1
+SCNWID		= $B2			; Current Screen Width 
+TEMPMSG		= $B3			; Temp Message# Storage
 
 ;-- Details for Directory being Browsed
 ; The order of these 7 locations must match the LEFT and RIGHT details!
 
-DMEMHI		= $B4				; +0 HI Directory Buffer Pointer
-DTOP		= $B5				; +1 Index of Top entry
-DSEL		= $B6				; +2 Index of Selected Entry
-DBOT		= $B7				; +3 Index of Bottom Entry
-DEND		= $B8				; +4 Index of Last Entry
-DCOL		= $B9				; +5 Left column for directory listing
-DSELMEM		= $BA				; +6 LO Selected Item Memory Pointer
-;		= $BB				; +7 HI Selected Item Memory Pointer
+DMEMHI		= $B4			; +0 HI Directory Buffer Pointer
+DTOP		= $B5			; +1 Index of Top entry
+DSEL		= $B6			; +2 Index of Selected Entry
+DBOT		= $B7			; +3 Index of Bottom Entry
+DEND		= $B8			; +4 Index of Last Entry
+DCOL		= $B9			; +5 Left column for directory listing
+DSELMEM		= $BA			; +6 LO Selected Item Memory Pointer
+;		= $BB			; +7 HI Selected Item Memory Pointer
 
-DCOUNT		= $BC				; Counter for directory display
-DENTRY		= $BD				; Index of current Entry
-CMDKEY		= $BE				; Command Keypress
-CMDJUMP		= $BF				; LO Command Jump
-;		= $C0				; HI Command Jump
-;		= $C1				; FREE
-;		= $C2				; FREE
-;		= $C3				; FREE
+DCOUNT		= $BC			; Counter for directory display
+DENTRY		= $BD			; Index of current Entry
+CMDKEY		= $BE			; Command Keypress
+CMDJUMP		= $BF			; LO Command Jump
+;		= $C0			; HI Command Jump
+;		= $C1			; FREE
+;		= $C2			; FREE
+;		= $C3			; FREE
 
 ;-- $ED-$F7 not used in 80-column machines. Safe to use here for now?
 
-ZP1		= $EE				; Srce Pointer - Scn Cpy, String Print
-ZP2		= $F0				; Dest Pointer - Scn Cpy
-ZP3		= $F2				; Work Pointer - Directory display
-;		= $F4				; FREE
-;		= $F6				; FREE
+ZP1		= $EE			; Srce Pointer - Scn Cpy, String Print
+ZP2		= $F0			; Dest Pointer - Scn Cpy
+ZP3		= $F2			; Work Pointer - Directory display
+;		= $F4			; FREE
+;		= $F6			; FREE
 
 ;-------------- Memory Locations
 ; These locations should eventually move to BASIC program space so that ML code
@@ -102,41 +102,41 @@ ZP3		= $F2				; Work Pointer - Directory display
 ; TODO: instead of copying individual bytes we should copy the entire block for
 ;       LEFT or RIGHT to/from ZP locations for current DIR memory.
 
-TAPEBUFFER      = $027A				; 634   Tape buffer
+TAPEBUFFER      = $027A			; 634   Tape buffer
 
 SCREENMEM	= TAPEBUFFER
-LEFTMEM		= TAPEBUFFER+10			; Start of LEFT  Memory Structure
-RIGHTMEM	= TAPEBUFFER+20			; Start of RIGHT Memory Structure
+LEFTMEM		= TAPEBUFFER+10		; Start of LEFT  Memory Structure
+RIGHTMEM	= TAPEBUFFER+20		; Start of RIGHT Memory Structure
 
-SCNSAVE1	= SCREENMEM			; Cursor Pointer LO
-SCNSAVE2	= SCREENMEM+1			; Cursor Pointer HI
-SCNSAVE3	= SCREENMEM+2			; Cursor Column/offset
-SCNSAVE4	= SCREENMEM+3			; Cursor Row
-SCNMEMHI	= SCREENMEM+4			; LO Pointer to Screen Buffer
+SCNSAVE1	= SCREENMEM		; Cursor Pointer LO
+SCNSAVE2	= SCREENMEM+1		; Cursor Pointer HI
+SCNSAVE3	= SCREENMEM+2		; Cursor Column/offset
+SCNSAVE4	= SCREENMEM+3		; Cursor Row
+SCNMEMHI	= SCREENMEM+4		; LO Pointer to Screen Buffer
 ;
-CMDMEM		= SCREENMEM+6			; LO Command String Buffer Pointer
-;		= SCREENMEM+7			; HI Command String Buffer Pointer
+CMDMEM		= SCREENMEM+6		; LO Command String Buffer Pointer
+;		= SCREENMEM+7		; HI Command String Buffer Pointer
 
 ;-- Details for LEFT/RIGHT Directory
 ; These locations must match the ones in Zero Page (starting from DMEM)
 
-LDIRACTIVE	= LEFTMEM			; LEFT Active Status
-LDIRMEMHI	= LEFTMEM+1			; LEFT HI Directory Buffer Page
-LDIRTOP		= LEFTMEM+2			; LEFT Index of Top Entry
-LDIRSEL		= LEFTMEM+3			; LEFT Index of Selected entry
-LDIRBOT		= LEFTMEM+4			; LEFT Index of Bottom entry
-LDIREND		= LEFTMEM+5			; LEFT Index of Last Entry
-LSELMEM		= LEFTMEM+6			; LEFT LO Selected Item Memory 
-;		= LEFTMEM+7			; LEFT HI Selected Item Memory 
+LDIRACTIVE	= LEFTMEM		; LEFT Active Status
+LDIRMEMHI	= LEFTMEM+1		; LEFT HI Directory Buffer Page
+LDIRTOP		= LEFTMEM+2		; LEFT Index of Top Entry
+LDIRSEL		= LEFTMEM+3		; LEFT Index of Selected entry
+LDIRBOT		= LEFTMEM+4		; LEFT Index of Bottom entry
+LDIREND		= LEFTMEM+5		; LEFT Index of Last Entry
+LSELMEM		= LEFTMEM+6		; LEFT LO Selected Item Memory 
+;		= LEFTMEM+7		; LEFT HI Selected Item Memory 
 
-RDIRACTIVE	= RIGHTMEM			; RIGHT Active Status
-RDIRMEMHI	= RIGHTMEM+1			; RIGHT HI Directory Buffer Page
-RDIRTOP		= RIGHTMEM+2			; RIGHT Index of Top Entry
-RDIRSEL		= RIGHTMEM+3			; RIGHT Index of Selected entry
-RDIRBOT		= RIGHTMEM+4			; RIGHT Index of Bottom entry
-RDIREND		= RIGHTMEM+5			; RIGHT Index of Last Entry
-RSELMEM		= RIGHTMEM+6			; RIGHT LO Selected Item Memory 
-;		= RIGHTMEM+7			; RIGHT HI Selected Item Memory 
+RDIRACTIVE	= RIGHTMEM		; RIGHT Active Status
+RDIRMEMHI	= RIGHTMEM+1		; RIGHT HI Directory Buffer Page
+RDIRTOP		= RIGHTMEM+2		; RIGHT Index of Top Entry
+RDIRSEL		= RIGHTMEM+3		; RIGHT Index of Selected entry
+RDIRBOT		= RIGHTMEM+4		; RIGHT Index of Bottom entry
+RDIREND		= RIGHTMEM+5		; RIGHT Index of Last Entry
+RSELMEM		= RIGHTMEM+6		; RIGHT LO Selected Item Memory 
+;		= RIGHTMEM+7		; RIGHT HI Selected Item Memory 
 
 
 ;======================================================================================
@@ -162,9 +162,9 @@ Start:
 		JSR ShowRightDir		; Show the RIGHT directory
 		JSR ShowLeftDir			; Show the LEFT directory
 
-		JSR GetDiskStatus		; Get Disk Status
+;		JSR GetDiskStatus		; Get Disk Status
 
-		JSR Interact			; The Main Code. Loops until Exit.
+		JSR ILoopStat			; The Main Code. Loops until Exit.
 BrowseDone:	RTS				; Exit Program
 
 ;TestMsg1:	!PET "[test1]",13,0
@@ -213,10 +213,9 @@ KeyFound:	DEY				; Yes, index to previous key
 
 IRestart:	JSR DrawUI			; Re-draw GUI
 IRefresh:	JSR ShowDirectory		; Re-draw Directory
-ILoop:		JMP Interact			; Loop back for more
-
-ILoopStat:	JSR ClearMsg			; Clear Status Line
 		JMP Interact
+ILoopStat:	JSR ShowKeyBar			; Show Key Help line
+ILoop:		JMP Interact			; Loop back for more
 
 ShowPET:
 !IF SCREENSAVE=1{
@@ -233,7 +232,7 @@ ShowPET:
 
 ;-------------- Exit Program
 
-IsQuit:		JSR AskSure			; Prompt to Exit
+IsQuit:		JSR AskQuit			; Prompt to Exit
 		CMP #89				; Is it "Y"?
 		BNE ILoopStat			; No, continue
 		JMP ShowPET			; Yes, Restore screen, cursor, then Exit!
@@ -372,8 +371,9 @@ IsRETURN:
 
 ;-------------- Do File Load
 
-LoadPRG:	LDY #1		
-		JSR PrintNM			; Are you sure?
+LoadPRG:	LDY #9				; "Load PRG?"	
+		JSR ClearKeyNM			; Print It
+		JSR AskSure			; Are you sure?
 		CMP #89				; Is it "Y"?
 		BEQ LPgo			; Yes
 		JMP ILoopStat
@@ -437,7 +437,7 @@ SetDZX:		RTS
 ; Prompt for Drive Device Number. Accepts 0-9 or STOP=Abort. 0-7 are treated as 10-17.
 
 AskDevice:	LDY #3					; Point to Prompt
-		JSR PrintMsgNM				; Print the message
+		JSR ClearKeyNM				; Print the message
 AskDloop	JSR AnyKey				; Get ANY Key		
 		CMP #3					; Is it Stop
 		BEQ AskAbort				; Yes, abort
@@ -458,7 +458,7 @@ NoAdj:		SBC #48					; Subtract 48 - Device# in .A
 ; Prompt for Drive Unit Number. Accepts 0-1 or STOP=Abort
 
 AskUnit:	LDY #4					; Point to Prompt
-		JSR PrintNM				; Print the message
+		JSR ClearKeyNM				; Print the message
 AskUloop:	JSR AnyKey				; Get ANY Key		
 		CMP #3					; Is it Stop
 		BEQ AskAbort				; Yes, abort
@@ -479,9 +479,10 @@ AskAbort:	LDA #0					; Return a NULL
 ; Display confirmation then wait for ANY KEY - No validation done
 ; Answer returned in .A
 
-AskSure:	JSR ClearMsg
-		LDY #2					; "Quit?"
-		JSR PrintMsgNM				; Print the Message
+AskQuit:	LDY #2					; "Quit?"
+		JSR ClearKeyNM				; Clear KEY Row, Print the Message
+AskSure:	LDY #13					; "Are you sure"
+		JSR PrintNM				; Print the Message
 AnyKey:		JSR GETIN				; Get keystroke to .A
 		BEQ AnyKey				; None, so loop back
 		RTS
@@ -515,7 +516,7 @@ SetDirMem:	STA DMEMHI			; HI Top Index Memory Pointer
 		RTS
 
 ;======================================================================================
-; DEBUG TO SCREEN
+; DEBUG TO SCREEN !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 ;======================================================================================
 
 DIRDEBUG:	LDY DTOP
@@ -551,7 +552,8 @@ ShowDirectory:	JSR SetDZ			; Set ZP3 pointer based on DTOP
 SDLoop:		LDA #DIRROW			; Cursor Position for Top Left
 		CLC
 		ADC DCOUNT			; Add Entry Count
-		LDY DCOL			; Column for selected directory
+		TAX
+		LDA DCOL			; Column for selected directory
 		JSR CursorAt			; Move cursor to top of directory
 
 		LDY #0				; Index for print loop
@@ -621,22 +623,25 @@ SDexit:		DEC DBOT			; adjust
 ; CursorCol is used as offset. Messes up .A and .X registers
 ; ****We should be able to replace this routine when integrating with Editrom!
 
+SetCursorAX:	STA CursorCol			; Set COL
+		STX CursorRow			; Set ROW
+
 SetCursor:	TYA
 		PHA
-		LDY CursorRow				; Get ROW as index
-		LDA SCNWID				; Check Screen Width
-		CMP #80					; Is it 80?
-		BEQ SetC80				; Yes, skip over
+		LDY CursorRow			; Get ROW as index
+		LDA SCNWID			; Check Screen Width
+		CMP #80				; Is it 80?
+		BEQ SetC80			; Yes, skip over
 
-		LDA SLA40_Lo,Y				; Get LO from Table
-		LDX SLA40_Hi,Y				; Get HI from Table
+		LDA SLA40_Lo,Y			; Get LO from Table
+		LDX SLA40_Hi,Y			; Get HI from Table
 		BNE SetCAX
 
-SetC80:		LDA SLA80_Lo,Y				; Get LO from Table
-		LDX SLA80_Hi,Y				; Get HI from Table
+SetC80:		LDA SLA80_Lo,Y			; Get LO from Table
+		LDX SLA80_Hi,Y			; Get HI from Table
 
-SetCAX:		STA ScrPtr				; Store in ScrPrt LO
-		STX ScrPtr+1				; Store in ScrPrt HI
+SetCAX:		STA ScrPtr			; Store in ScrPrt LO
+		STX ScrPtr+1			; Store in ScrPrt HI
 SetCDone:	PLA
 		TAY
 		RTS
@@ -683,9 +688,8 @@ SENDCMDDONE	JSR UNLSN			; un-listen
 ; Read the status string: ##,String,TT,SS
 
 GetDiskStatus:
-		LDA #DSROW			; Disk Status ROW
-		LDY #0				; Column 0
-		JSR CursorAt			; Set the cursor
+		LDX #DSROW			; Disk Status ROW
+		JSR CursorR			; Set the cursor to start of Row
 
 		LDA MYDRIVE			; Current Device#
 		STA FA				; Set device number
@@ -768,7 +772,7 @@ LoadDirectory:
 		STA DSEL			; Index of Selected Entry
   
 		LDY #6				; Print "Reading.."
-		JSR PrintMsgNM
+		JSR ClearKeyNM
 
 		LDY #2				; Length=2 "$0" or "$1" DEBUG!!!!!!!!!!!!!
 		STY FNLEN			; Save it
@@ -1009,69 +1013,85 @@ RestoreCursorPos:
 ; Draw Program Info and key help line
 
 DrawUI:		JSR CLEARSCREEN			; Clear Screen
+
 		LDX #PROGROW			; Program Info ROW
 		LDY #14				; Message#
 		JSR PrintRowNM			; Print Program Info
 
-		LDX #HELPROW-1			; Row 23
-		LDY #104			; Horizontal line chr
+		LDX #KEYROW-1			; Row 23
+		LDA #104			; Horizontal line chr
 		JSR FillRow			; Fill the row with 
 
-		LDX #HELPROW
-		LDY #12				; Key Command Bar
-		JSR PrintRowNM			; Print Key Bar
+ShowKeyBar:	LDY #12				; Key Command Bar
+		JSR ClearKeyNM			; Print Key Bar		
 		RTS
 
 ;======================================================================================
 ; DATA TABLES
 ;======================================================================================
 
-KeyBar:		!BYTE HELPROW,0					; HELP ROW
-
-FNDir0:		!PET "$0",0					; Directory string
-FNDir1:		!PET "$1",0					; Directory string
+FNDir0:		!PET "$0",0			; Directory string
+FNDir1:		!PET "$1",0			; Directory string
 
 
 ;======================================================================================
 ; PRINT ROUTINES
 ;======================================================================================
-; CursorAt:	.A=ROW, .Y=COL			Positions cursor.
-; PrintMsg:	.A=LO,  .Y=HI addr of string
-; ClearMsg:	NONE				Clears Status line with SPACES
-; ClearRow:	.A=ROW, 			Clears the entire ROW with SPACE.
-; FillRow:	.A=ROW, .Y=CHR			Clears the entire ROW with CHR.
+; CursorR:	.X=ROW, .A=0			Position to Start of ROW
+; CursorAt:	.X=ROW, .A=COL			Position Cursor
+; ClearRow:	.X=ROW, CHR=32			Clears the Entire ROW with SPACE.
+; FillRow:	.X=ROW, .A=CHR			Clears the Entire ROW with CHR.
+;-------------- NM: Numbered Message Print Routines
+; ClearKeyNM:	.Y=Msg#, Row=KEYROW, Col=0	Clear then Print Msg# on MSGROW
+; ClearMsgNM:	.Y=Msg#, Row=MSGROW, Col=0	Clear then Print Msg# on MSGROW
+; PrintMsgNM:   .Y=Msg#, Row=MSGROW, Col=0	Print Msg# on MSGROW
+; PrintRowNM:	.Y=Msg#, .X=Row,     Col=0	Print Msg# at Row,0
+; PrintAtNM:	.Y=Msg#, .X=Row,     .A=Col	Print Msg# at Row,Col
+; PrintNM:	.Y=Msg#, at Cursor Position	Print Msg#
 
-;-------------- Numbered Message Print Routines
+;-------------- Move Cursor to specified ROW and COL
+;		.X=Row, .A=Col
 
-; PrintMsgNM:   .Y=Msg#, Row=MSGROW, Col=0	Print Message on MSGROW
-; PrintRowNM:	.Y=Msg#, .X=Row#,    Col=0	Print String# at Row,0
-; PrintAtNM:	.Y=Msg#, .X=Row#,    .A=Col#	Print String# at Row,Col
-; PrintNM:	.Y=Msg#, at Cursor Position	Print String#
-
-CursorAt:	STA CursorRow			; Set ROW
-		STY CursorCol			; Set COL
-		JSR SetCursor			; Position Cursor
+CursorR:	LDA #0				; COL=0
+CursorAt:	JSR SetCursorAX			; Position Cursor to ROW=.X, COL=.A , .Y preserved
 		RTS
 
-ClearMsg:	LDA #MSGROW			; Message ROW
-ClearRow:	LDY #32				; <SPACE>
-FillRow:	JSR CursorAt			; Set the cursor
-		LDA CursorCol			; Put CHR to A
-		LDY #0				; Start Counter at cursor pos
+;-------------- Clear or Fill specified ROW
+; Clear:	.X=Row, CHR=32
+; Fill:		.X=Row, .A=CHR (screencode)
+
+ClearRow:	LDA #32				; <SPACE>
+FillRow:	PHA				; Push CHR to Fill with in .A pushed to stack
+		JSR CursorR			; Set the cursor (.A lost
+		PLA				; Pull CHR from stack .A
+
+;-------------- Clear the ROW
+
+ClearR:		LDY #0				; Start Counter at cursor pos
 ClearRloop:	STA (ScrPtr),Y			; Write character to screen
 		INY				; Next position
 		CPY SCNWID			; Is is end of line? 
 		BNE ClearRloop			; No, go back for more
 		RTS
- 
-PrintMsgNM:	LDX #MSGROW			; Status Row
+
+ClearKeyNM:	LDX #KEYROW			; Clear Key Bar Row then print Msg#
+		JMP PrintClear
+
+ClearMsgNM:	LDX #MSGROW			; Clear Message Row then print Msg#
+
+PrintClear:	STY TEMPMSG			; Save Msg#		
+		JSR ClearRow			; Clear IT
+		LDY TEMPMSG			; Re-load Msg#
+		JMP PrintNM
+
+;--------------
 PrintRowNM:	LDA #0				; Col=0
-PrintAtNM:	STA CursorCol			; Set COL
-		STX CursorRow			; Set ROW
-		JSR SetCursor			; Position Cursor
+PrintAtNM:	JSR SetCursorAX			; Position Cursor. .Y preserved
+
+;-------------- Print Numbered Message
 		
-PrintNM:	LDA NMOffset,Y			; Get Offset
-		TAY				; put in .Y
+PrintNM:	LDA NMOff,Y			; Get Offset
+		TAY				; Put Offset in .Y
 		LDA #<NMS			; LO
 		STA ZP2				; LO Pointer
 		LDA #>NMS			; HI
@@ -1084,41 +1104,48 @@ PNMloop		LDA (ZP2),Y			; Get the character to print
 		JMP PNMloop			; loop for more
 PNMexit:	RTS
 
-;-------------- Numbered Message Strings
 
-NMOffset:	!BYTE NM0-NMS,NM1-NMS,NM2-NMS,NM3-NMS		; 0-3
-		!BYTE NM4-NMS,NM5-NMS,NM6-NMS,NM7-NMS		; 4-7
-		!BYTE NM8-NMS,NM9-NMS,NM10-NMS,NM11-NMS		; 8-11
-		!BYTE NM12-NMS,NM13-NMS,NM14-NMS		; 12-14
+;======================================================================================
+; Numbered Message Strings
+;======================================================================================
 
-NMS:								; Start of Numbered Message String Area
+NMOff:	!BYTE NM0-NMS,NM1-NMS,NM2-NMS,NM3-NMS	; 0-3
+	!BYTE NM4-NMS,NM5-NMS,NM6-NMS,NM7-NMS	; 4-7
+	!BYTE NM8-NMS,NM9-NMS,NM10-NMS,NM11-NMS	; 8-11
+	!BYTE NM12-NMS,NM13-NMS,NM14-NMS	; 12-14
 
-NM0:	!BYTE 0							; For print@ 
-NM1:	!BYTE 19,19,147,17,0					; <HOME><HOME><CLS><DOWN>
-NM2:	!PET "quit?",0					
-NM3:	!PET "device# (",RVS,"8",ROFF," ",RVS,"9",ROFF
-	!PET " 1",RVS,"0",ROFF," 1",RVS,"1",ROFF," 1",RVS,"2",ROFF,")?",0
+NMS:						; Start of Numbered Message String Area
+
+NM0:	!BYTE 0					; For print@ 
+NM1:	!BYTE 19,19,147,17,0			; <HOME><HOME><CLS><DOWN>
+NM2:	!PET "quit: ",0					
+NM3:	!PET "device# ("			; Device selection (8-12)
+	!PET RVS,"8",ROFF," "
+	!PET RVS,"9",ROFF," 1"
+	!PET RVS,"0",ROFF," 1"
+	!PET RVS,"1",ROFF," 1"
+	!PET RVS,"2",ROFF,")?",0
 
 NM4:	!PET "unit (0,1)?",0
-NM5:	!PET 146,"# of entries:",0
-NM6:	!PET "reading",0
+NM5:	!PET "entries:",0
+NM6:	!PET "reading...",0
 NM7:	!PET "copying...",0
 NM8:	!PET "renaming...",13,0
-NM9:	!PET "load prg?",0			; Load prompt
+NM9:	!PET "load prg: ",0			; Load prompt
 NM10:	!PET 147,"dL",0				; <CLS>dL<QUOTE> - Pre-filename
 NM11:	!PET ",d0,u8",0				; d0,u8          - Post-filename
 
-NM12:	!PET  RVS,"cls"   ,ROFF,"drive "	; Select Drive
-	!PET  RVS,"/"     ,ROFF,"switch "	; Switch Sides
-	!PET  RVS,"crsr"  ,ROFF,"sel "		; Cursor
-	!PET  RVS,"home"  ,ROFF,"top "		; Home
-	!PET  RVS,"<>"    ,ROFF,"page "		; Page Up/Down
-	!PET  RVS,"spc"   ,ROFF,"mark "		; Space
-	!PET  RVS,"rtn"   ,ROFF,"run/cd "	; Return
-	!PET  RVS,"q"     ,ROFF,"quit",0	; Quit
+NM12:	!PET RVS,"cls"   ,ROFF,"drive "		; Select Drive
+	!PET RVS,"/"     ,ROFF,"switch "	; Switch Sides
+	!PET RVS,"crsr"  ,ROFF,"sel "		; Cursor
+	!PET RVS,"home"  ,ROFF,"top "		; Home
+	!PET RVS,"<>"    ,ROFF,"page "		; Page Up/Down
+	!PET RVS,"spc"   ,ROFF,"mark "		; Space
+	!PET RVS,"rtn"   ,ROFF,"run/cd "	; Return
+	!PET RVS,"q"     ,ROFF,"quit",0	; Quit
 
-NM13:	!PET " are you sure (y/n)?",0		; Are you Sure?
-NM14:	!PET "stevebrowse 2021-04-13",0 			; Title text
+NM13:	!PET "are you sure (y/n)?",0		; Are you Sure?
+NM14:	!PET "stevebrowse 2021-04-14",0 	; Title text
 
 ;======================================================================================
 ; SCREEN LINE ADDRESS TABLE
