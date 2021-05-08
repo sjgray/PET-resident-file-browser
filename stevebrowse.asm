@@ -414,7 +414,7 @@ IsRETURN:	LDY #19				; Index to FILETYPE Character
 		BEQ SelPart			; Tes, Select Partition
 		JMP IRefreshStat
 
-;-------------- Do File Load
+;-------------- Confirm File Load
 
 LoadPRG:	LDY #9				; "Load PRG?"	
 		JSR ClearKeyNM			; Print It
@@ -422,6 +422,9 @@ LoadPRG:	LDY #9				; "Load PRG?"
 		CMP #89				; Is it "Y"?
 		BEQ LPgo			; Yes
 		JMP ILoopStat
+
+;-------------- Do File Load
+; Clear screen and print the load command, then stuff <CR> into keyboard to invoke
 
 LPgo:		LDY #10				; Pre-filename string <CLS>dL<QUOTE>
 		JSR PrintNM			; Print the string
@@ -435,8 +438,20 @@ LPloop:		LDA (DSELMEM),Y			; Get character
 		CMP #34				; Is it <QUOTE>?		
 		BNE LPloop			; No, loop back for more
 
-LPpost:		LDY #11				; Post-filename string <QUOTE>,D0 ON U8<CR><CR>
+LPpost:		LDY #11				; Drive string ",D"
 		JSR PrintNM			; Print the string
+
+		LDX DUNIT			; Device# (0 or 1)		
+		JSR PrintX			; Write INT to screen
+
+		LDY #12				; Unit string ",U"
+		JSR PrintNM
+
+		LDX DDEV			; Unit#
+		JSR PrintX			; Write INT to screen
+
+
+;-------------- Stuff <CR> into Keyboard buffer
 
 		LDA #19				; Home
 		STA $026F			; First byte of keyboard buffer
@@ -445,6 +460,17 @@ LPpost:		LDY #11				; Post-filename string <QUOTE>,D0 ON U8<CR><CR>
 		LDA #2				
 		STA $9E				; # of chrs in keyboard buffer
 		RTS				; Exit program
+
+;-------------- Print post-filename parts of DLOAD sting
+
+PComma:		LDA #44				; Comma
+		JMP PRINT			; Print it and return
+PrintU:		LDA #68				; "U"
+		JMP PRINT			; Print it and return
+
+PrintX:		LDA #0
+		JSR INTOUT			; write INTEGER to screen
+		RTS
  	
 ;-------------- TODO! Change Dir or Select Partition
 SelPart:
@@ -545,8 +571,15 @@ ShowDirectory:	LDA DDEV			; Check if drive selected
 		LDA DEND			; Check END
 		BNE ShowDstart			; Ok, good to go
 
-ShowIsOff:	LDY #16				; "No Dir loaded"
-		JMP ClearMsgNM			; Print it and end
+ShowIsOff:	LDX DROW
+		LDA DCOL
+		LDY #18				; "No Dir loaded"
+		JSR PrintAtNM			; Print it and end
+		LDX DROW
+		INX
+		LDA DCOL
+		LDY #16
+		JMP PrintAtNM
 
 ShowDstart:	JSR SetDirPtr			; Always start at HEADER!		
 		LDY #0				; Top Entry (HEADER)
@@ -1037,9 +1070,9 @@ SetDZX:		RTS
 ; Display confirmation then wait for ANY KEY - No validation done
 ; Answer returned in .A
 
-AskQuit:	LDY #2					; "Quit?"
+AskQuit:	LDY #4					; "Quit?"
 		JSR ClearKeyNM				; Clear KEY Row, Print the Message
-AskSure:	LDY #13					; "Are you sure"
+AskSure:	LDY #5					; "Are you sure"
 		JSR PrintNM				; Print the Message
 AnyKey:		JSR GETIN				; Get keystroke to .A
 		BEQ AnyKey				; None, so loop back
@@ -1050,7 +1083,7 @@ AnyKey:		JSR GETIN				; Get keystroke to .A
 ;======================================================================================
 ; Prompt for Drive Device Number. Accepts 0-9 or STOP=Abort. 0-7 are treated as 10-17.
 
-AskDevice:	LDY #3					; Point to Prompt
+AskDevice:	LDY #20					; Point to Prompt
 		JSR ClearKeyNM				; Print the message
 AskDloop	JSR AnyKey				; Get ANY Key
 		CMP #3					; Is it Stop
@@ -1071,7 +1104,7 @@ NoAdj:		SBC #48					; Subtract 48 - Device# in .A
 ;======================================================================================
 ; Prompt for Drive Unit Number. Accepts 0-1 or STOP=Abort
 
-AskUnit:	LDY #4					; "Unit (0/1)?" Prompt
+AskUnit:	LDY #21					; "Unit (0/1)?" Prompt
 		JSR ClearKeyNM				; Print the message
 AskUloop:	JSR AnyKey				; Get ANY Key
 		STA SCREEN_RAM+73
@@ -1185,7 +1218,7 @@ RestCursorPos:	LDA SCNSAVE1
 DrawUI:		JSR CLEARSCREEN			; Clear Screen
 
 		LDX #PROGROW			; Program Info ROW
-		LDY #14				; Message#
+		LDY #2				; Message#
 		JSR PrintRowNM			; Print Program Info
 
 		LDX #1				; Row 1
@@ -1196,7 +1229,7 @@ DrawUI:		JSR CLEARSCREEN			; Clear Screen
 		LDA #64				; Horizontal line chr
 		JSR FillRow			; Fill the row with 
 
-ShowKeyBar:	LDY #12				; Key Command Bar
+ShowKeyBar:	LDY #3				; Key Command Bar
 		JSR ClearKeyNM			; Print Key Bar		
 		RTS
 
@@ -1284,45 +1317,47 @@ PNMexit:	RTS
 
 NMAdLo:	!BYTE <NM0,<NM1,<NM2,<NM3,<NM4,<NM5,<NM6,<NM7		; 0-7
 	!BYTE <NM8,<NM9,<NM10,<NM11,<NM12,<NM13,<NM14,<NM15	; 8-15
-	!BYTE <NM16,<NM17,<NM18,<NM19				; 16-
+	!BYTE <NM16,<NM17,<NM18,<NM19,<NM20,<NM21		; 16-
 
 NMAdHi:	!BYTE >NM0,>NM1,>NM2,>NM3,>NM4,>NM5,>NM6,>NM7		; 0-7
 	!BYTE >NM8,>NM9,>NM10,>NM11,>NM12,>NM13,>NM14,>NM15	; 8-15
-	!BYTE >NM16,>NM17,>NM18,>NM19				; 16-
+	!BYTE >NM16,>NM17,>NM18,>NM19,>NM20,>NM21		; 16-
 
 NM0:	!BYTE 0						; For print@ 
 NM1:	!BYTE 19,19,147,17,0				; <HOME><HOME><CLS><DOWN>
-NM2:	!PET "quit: ",0					
-NM3:	!PET "device# ("				; Device selection prompt
-	!PET RVS,"8",ROFF," "
-	!PET RVS,"9",ROFF," 1"
-	!PET RVS,"0",ROFF," 1"
-	!PET RVS,"1",ROFF," 1"
-	!PET RVS,"2",ROFF,")?",0
+NM2:	!PET "stevebrowse 2021-04-20",0 		; Title text
 
-NM4:	!PET "unit (0,1)?",0				; Unit selection prompt
-NM5:	!PET "entries:",0				; Dir info
-NM6:	!PET "reading...",0				; Reading...
-NM7:	!PET "copying...",0				; Copying...
-NM8:	!PET "renaming...",13,0				; Rename...
-NM9:	!PET "load prg: ",0				; Load prompt
-NM10:	!PET 147,"dL",0					; <CLS>dL<QUOTE> - Pre-filename
-NM11:	!PET ",d0,u8",0					; d0,u8          - Post-filename
-
-NM12:	!PET RVS,"/"	,ROFF,"drive "			; Select Drive	
+NM3:	!PET RVS,"/"	,ROFF,"drive "			; Select Drive	
 	!PET RVS,"home" ,ROFF,"top "			; Home
 	!PET RVS,"[]"   ,ROFF,"page "			; Page Up/Down
 	!PET RVS,"spc"  ,ROFF,"mark "			; Space
 	!PET RVS,"rtn"  ,ROFF,"run/cd "			; Return
 	!PET RVS,"q"    ,ROFF,"quit",0			; Quit
 
-NM13:	!PET "are you sure (y/n)?",0			; Are you Sure?
-NM14:	!PET "stevebrowse 2021-04-20",0 		; Title text
+NM4:	!PET "quit: ",0					
+NM5:	!PET "are you sure (y/n)?",0			; Are you Sure?
+NM6:	!PET "reading...",0				; Reading...
+NM7:	!PET 18,"[no directory      ]",146,0		; No Directory
+NM8:	!PET "entries:",0				; Dir info
+NM9:	!PET "load prg: ",0				; Load prompt
+NM10:	!PET 147,"dL",0					; <CLS>dL	- Pre-filename
+NM11:	!PET ",d",0					; Drive#  D0/D1
+NM12:	!PET ",u",0					; Device# U8-U17
+NM13:	!PET "copying...",0				; Copying...
+NM14:	!PET "renaming...",13,0				; Rename...
 NM15:   !PET "dev:xx unit:x ",0				; Device# and Unit# display
 NM16:	!PET "hit '/' to select!",0			;
 NM17:	!PET "ds: ",0					; Disk Status
-NM18:	!PET "no directory",0				; No Directory
+NM18:	!PET "x",0					; unused
 NM19:	!PET "                     ",0			; Blank dir entry
+
+NM20:	!PET "device# ("				; Device selection prompt
+	!PET RVS,"8",ROFF," "
+	!PET RVS,"9",ROFF," 1"
+	!PET RVS,"0",ROFF," 1"
+	!PET RVS,"1",ROFF," 1"
+	!PET RVS,"2",ROFF,")?",0
+NM21:	!PET "unit (0,1)?",0				; Unit selection prompt
 
 ;======================================================================================
 ; SCREEN LINE ADDRESS TABLE
