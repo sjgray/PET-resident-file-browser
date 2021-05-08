@@ -57,32 +57,38 @@ ROFF		= 146				; <OFF>
 ;STROUT		= $bb24				; X=len, STRADR=ptr
 
 
-ACTIVEDIR	= $B1				; Active Directory# 0 or 1
+ACTIVE		= $B1				; Active Directory# 0 or 1
 SCNWID		= $B2				; Current Screen Width 
 ;CLMARGIN	= $B3				; Cursor LEFT Margin
 
 ;-- Details for Directory being Browsed
+; The order of these 7 locations must match the LEFT and RIGHT details!
 
-DMEMHI		= $B4				; HI Directory Buffer Pointer
-DTOP		= $B5				; Index of Top entry
-DSEL		= $B6				; Index of Selected Entry
-DBOT		= $B7				; Index of Bottom Entry
-DEND		= $B8				; Index of Last Entry
-DCOL		= $B9				; Left column for directory listing
-DSELMEM		= $BA				; LO Selected Item Memory Pointer
-;		= $BB				; HI Selected Item Memory Pointer
+DMEMHI		= $B4				; +0 HI Directory Buffer Pointer
+DTOP		= $B5				; +1 Index of Top entry
+DSEL		= $B6				; +2 Index of Selected Entry
+DBOT		= $B7				; +3 Index of Bottom Entry
+DEND		= $B8				; +4 Index of Last Entry
+DCOL		= $B9				; +5 Left column for directory listing
+DSELMEM		= $BA				; +6 LO Selected Item Memory Pointer
+;		= $BB				; +7 HI Selected Item Memory Pointer
 
 DCOUNT		= $BC				; Counter for directory display
 DENTRY		= $BD				; Index of current Entry
 CMDKEY		= $BE				; Command Keypress
 CMDJUMP		= $BF				; LO Command Jump
 ;		= $C0				; HI Command Jump
+;		= $C1				; FREE
+;		= $C2				; FREE
+;		= $C3				; FREE
 
 ;-- $ED-$F7 not used in 80-column machines. Safe to use here for now?
 
 ZP1		= $EE				; Srce Pointer - Scn Cpy, String Print
 ZP2		= $F0				; Dest Pointer - Scn Cpy
 ZP3		= $F2				; Work Pointer - Directory display
+;		= $F4				; FREE
+;		= $F6				; FREE
 
 ;-------------- Memory Locations
 ; These locations should eventually move to BASIC program space so that ML code
@@ -143,16 +149,13 @@ Start:
 		JSR DrawUI			; Draw the interface
 
 		JSR LoadLeftDir			; Load the LEFT directory		
-		JSR LoadRightDir		; Load the RIGHT directory
-		JSR ShowRightDir		; Show the RIGHT directory
+;		JSR LoadRightDir		; Load the RIGHT directory
+;		JSR ShowRightDir		; Show the RIGHT directory
 		JSR ShowLeftDir			; Show the LEFT directory
 
-		JSR GetDiskStatus		; Get Disk Status
+;		JSR GetDiskStatus		; Get Disk Status
 
 		JSR Interact			; The Main Code. Loops until Exit.
-
-		JSR RestoreScreen		; Restore the screen
-		JSR RestoreCursorPos		; Restore cursor position
 BrowseDone:	RTS				; Exit Program
 
 ;TestMsg1:	!PET "[test1]",13,0
@@ -166,10 +169,10 @@ BrowseDone:	RTS				; Exit Program
 ; keystrokes and acts on them, looping around until user exits.
 
 ;-------------- Command Key Table and Address Lo/HI Tables
-
-CMDTABLE:	!BYTE 88,17,145,19,32,62,60,47,147,0
-CMDLO:		!BYTE <IsExit,<IsDown,<IsUp,<IsHome,<IsSpace,<IsPgDn,<IsPgUp,<IsSlash,<IsCLS
-CMDHI:		!BYTE >IsExit,>IsDown,>IsUp,>IsHome,>IsSpace,>IsPgDn,>IsPgUp,>IsSlash,>IsCLS
+;       	KEY:   Q     , DOWN  , UP  , HOME  , SPACE  , <     , >     , /      , CLS  , RETURN  ,NULL
+CMDTABLE:	!BYTE  81    , 17    , 145 , 19    , 32     , 62    , 60    , 47     , 147  , 13      ,0
+CMDLO:		!BYTE <IsExit,<IsDown,<IsUp,<IsHome,<IsSpace,<IsPgDn,<IsPgUp,<IsSlash,<IsCLS,<IsRETURN
+CMDHI:		!BYTE >IsExit,>IsDown,>IsUp,>IsHome,>IsSpace,>IsPgDn,>IsPgUp,>IsSlash,>IsCLS,>IsRETURN
 
 ;-------------- Interactive Dispatch
 Interact:
@@ -186,23 +189,40 @@ Interact:
 KeyLookup:	LDA CMDTABLE,Y			; Get a Key from the table
 		INY				; Index for next key
 		CMP #0				; End of Key List?
-		BEQ Interact			; Yes, loop for another key
+		BEQ Interact			; Yes, key not found. Get another KEY
 		CMP CMDKEY			; Is is a key from the table?
-		BNE KeyLookup			; No, loop for next Key
+		BNE KeyLookup			; No, check next in list
 
-KeyFound:	DEY
+KeyFound:	DEY				; Yes, index to previous key
 		LDA CMDLO,Y			; Get Target Address LO
 		STA CMDJUMP			; Store it
 		LDA CMDHI,Y			; Get Target Address LO
 		STA CMDJUMP+1			; Store it
 		JMP (CMDJUMP)			; Go to the Target Address
 
-;-------------- Interactive Routines
+;-------------- Post-command actions
 
+IRestart:	JSR DrawUI			; Re-draw GUI
 IRefresh:	JSR ShowDirectory		; Re-draw Directory
 ILoop:		JMP Interact			; Loop back for more
 
-IsExit:		RTS				; Exit!
+ILoopStat:	JSR ClearMsg			; Clear Status Line
+		JMP Interact
+
+ShowPET:	JSR RestoreScreen		; Restore the screen
+		JSR RestoreCursorPos		; Restore cursor position
+		RTS
+
+;======================================================================================
+; Key Actions
+;======================================================================================
+
+;-------------- Exit Program
+
+IsExit:		JSR SurePrompt			; Prompt to Exit
+		CMP #89				; Is it "Y"?
+		BNE ILoopStat			; No, continue
+		JMP ShowPET			; Yes, Restore screen, cursor, then Exit!
 
 ;-------------- Perform UP
 
@@ -303,14 +323,36 @@ IPUfull:	SBC #DIRHEIGHT			; Subtract height of display box
 
 ;-------------- Perform Select Directory LEFT/RIGHT
 
-IsSlash:	
+IsSlash:
+		LDA ACTIVE			; Active Directory (0=LEFT,1=RIGHT)
+		CMP #0				; Left Side?
+		BNE RightAct			; No, Right is active
+LeftAct:
+		;backup current to left
+
+RightAct:
+		;backup current to right
 
 
 ;-------------- Perform Load new Drive/Unit
 
 IsCLS:
 
+;-------------- Perform RETURN
 
+IsRETURN:
+		LDY #19				; Index to FILETYPE Character
+		LDA (DSEL),Y			; Get the FILETYPE
+		CMP #80				; "P"?
+		BEQ LoadPRG			; Yes, Load the file
+		CMP #68				; "D"?
+		BEQ ChangeDIR			; Yes, Change Director
+		
+		JMP IRefresh
+
+LoadPRG:
+ChangeDIR:
+		
 ;-------------- We are lost... for now
 
 		JMP IRefresh
@@ -391,13 +433,14 @@ DIRDEBUG:	LDY DTOP
 ; DSEL is the currently selected entry.
 
 ShowDirectory:	JSR SetDZ			; Set ZP3 pointer based on DTOP
-		JSR DIRDEBUG
+		JSR DIRDEBUG			; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 		LDY DTOP			; Top Entry
 		STY DENTRY			; Make it Current Entry
 		STY DBOT			; BOTTOM Index
 		LDY #0				; Count=1 (first entry displayed)
 		STY DCOUNT			; Entry Counter
-		;STY DEND			; END Index
+;		STY DEND			; END Index
 
 ;-------------- Position Cursor
 
@@ -515,7 +558,7 @@ ClearRow:	LDY #32					; <SPACE>
 FillRow:	JSR CursorAt				; Set the cursor
 		LDA CursorCol				; Put CHR to A
 		LDY #0					; Start Counter at cursor pos
-ClearRloop	STA (ScrPtr),Y				; Write character to screen
+ClearRloop:	STA (ScrPtr),Y				; Write character to screen
 		INY					; Next position
 		CPY SCNWID				; Is it end of line?
 		BNE ClearRloop				; No, go back for more
@@ -556,8 +599,18 @@ AnyKey:		JSR GETIN			; Get keystroke to .A
 		BEQ AnyKey			; None, so loop back
 		RTS
 
+;======================================================================================
+; CONFIRM (Y/N)
+;======================================================================================
+; Display confirmation then wait for Y/N (or STOP) key
+; Answer returned in .A
 
-
+SurePrompt:	LDA #<YesNoPrompt
+		LDY #>YesNoPrompt
+		JSR SetMsg
+SureLoop:	JSR GETIN
+		BEQ SureLoop
+		RTS
 
 
 
@@ -670,7 +723,9 @@ LoadRightDir:
 ; LOAD DIRECTORY
 ;======================================================================================
 ; Reads the directory into RAM pointed to by ZP1.
-; Counts # of directory entries to DTMP.
+; FNADR pointer must point to directory string
+; FNLEN must be set to length of string.-----------> To be fixed
+; Counts # of directory entries to DCOUNT.
 
 ;-------------- Prep
 LoadDirectory:
@@ -687,7 +742,7 @@ LoadDirectory:
 		LDY #>ReadingDir
 		JSR SetMsg
 
-		LDY #2				; Length=2 "$0" or "$1"
+		LDY #2				; Length=2 "$0" or "$1" DEBUG!!!!!!!!!!!!!
 		STY FNLEN			; Save it
 
 		LDA #0				; Clear the status byte
@@ -804,6 +859,8 @@ IncZP1X:	RTS
 ; LOAD / RUN
 ;======================================================================================
 ; Load a file. Run it too?
+; FNADR must be set to point to filename
+; FNLEN must be set to filename length
 
 loadrun:	lda #0				; Clear status byte
 		sta STATUS
@@ -813,6 +870,8 @@ loadrun:	lda #0				; Clear status byte
 		lda STATUS			; Did it load?
 		and #$10
 		bne loaderr			; No, exit out
+
+;-------------- File Exits,
 
 		lda EAL+1			; end of program MSB
 		sta VARTAB+1			; start of basic variables MSB
@@ -831,7 +890,9 @@ loadrun:	lda #0				; Clear status byte
 startprg	jsr STXTPT			; reset TXTPTR
 		jmp NEWSTT			; RUN
 
-loaderr		jmp FILENOTFOUND		; FILE NOT FOUND, return to basic
+loaderr:	jmp ILoop
+		
+;		jmp FILENOTFOUND		; FILE NOT FOUND, return to basic
 
 
 
@@ -852,7 +913,7 @@ loaderr		jmp FILENOTFOUND		; FILE NOT FOUND, return to basic
 ; ** Test on VICE with 8032 Model.
 
 InitStuff:	LDX #0				; Make our data start on page boundry
-		STX ACTIVEDIR			; Active Directory Listing (0/1)
+		STX ACTIVE			; Active Directory Listing (0/1)
 ;		STX CLMARGIN			; Cursor Left Margin
 
 		LDX STREND+1			; HI End of Arrays
@@ -978,24 +1039,24 @@ DrawUI:		JSR $E015			; Clear Screen
 ;-------------- User Interface
 
 ProgInfo:	!BYTE MSGROW-1,0				; Message ROW
-		!PET  "stevebrowse 2021-04-11",0 		; Title text
+		!PET  "stevebrowse 2021-04-12",0 		; Title text
 KeyBar:		!BYTE HELPROW,0					; HELP ROW
-		!PET  RVS,"cls",   ROFF,"drive "		; Select Drive
-		!PET  RVS,"/",     ROFF,"switch "		; Switch Sides
-		!PET  RVS,"crsr",  ROFF,"sel "			; Cursor
-		!PET  RVS,"home",  ROFF,"top "			; Home
-		!PET  RVS,"<>",    ROFF,"page "			; Page Up/Down
-		!PET  RVS,"space", ROFF,"mark "			; Space
-		!PET  RVS,"return",ROFF,"run/cd "		; Return
-		!BYTE RVS,94,      ROFF				; UpArrow
-		!PET  "root",0					; 
-
+		!PET  RVS,"cls"   ,ROFF,"drive "		; Select Drive
+		!PET  RVS,"/"     ,ROFF,"switch "		; Switch Sides
+		!PET  RVS,"crsr"  ,ROFF,"sel "			; Cursor
+		!PET  RVS,"home"  ,ROFF,"top "			; Home
+		!PET  RVS,"<>"    ,ROFF,"page "			; Page Up/Down
+		!PET  RVS,"spc"   ,ROFF,"mark "			; Space
+		!PET  RVS,"rtn"   ,ROFF,"run/cd "		; Return
+		!PET  RVS,"q"     ,ROFF,"quit",0		; Quit
 ;-------------- 
 HomeHome:	!BYTE 19,19,147,17,0				; <HOME><HOME><CLS><DOWN>
 FNDir0:		!PET "$0",0					; Directory string
 FNDir1:		!PET "$1",0					; Directory string
 
-AreUSure:	!PET "are you sure (y/n)?",0
+YesNoPrompt:	!PET "are you sure (y/n)?",0
+DevPrompt:	!PET "device (8=8,9=9,0=10,1=11,2=12)?",0
+UnitPrompt:	!PET "unit (0,1)?",0
 ReadingDir:	!PET "reading...",0		
 DirLoaded:	!PET 146,"# of entries:",0
 Copying		!PET "copying...",0
@@ -1024,29 +1085,6 @@ SLA80_Lo	!byte $00,$50,$a0,$f0,$40,$90,$e0,$30,$80,$d0,$20,$70,$c0
 
 SLA80_Hi	!byte $80,$80,$80,$80,$81,$81,$81,$82,$82,$82,$83,$83,$83
 		!byte $84,$84,$84,$85,$85,$85,$85,$86,$86,$86,$87,$87
-
-;		CMP #88				; Is it <X>?     - Exit
-;		BEQ IsExit			; 
-;		CMP #17				; Is it <DOWN>?  - Move Selection DOWN
-;		BEQ IsDown			;
-;		CMP #145			; Is it <UP>?    - Move Selection UP
-;		BEQ IsUp			;
-;		CMP #19				; Is it <HOME>?  - Back to Top
-;		BEQ IsHome			;
-;		CMP #32				; Is it <SPACE>? - Toggle Mark
-;		BEQ IsSpace
-;		CMP #62				; Is it ">"?     - Page Down
-;		BEQ IsPgDn
-;		CMP #60				; Is it "<"?     - Page UP
-;		BEQ IsPgUp
-;		CMP #47				; Is it "/"?     - Select Directory
-;		BEQ IsSlash
-;		CMP #147			; Is it <CLS>    - Change Drive/Unit
-;		BEQ IsCLS
-
-		JMP Interact			; Loop back for more
-
-
 
 
 ;======================================================================================
