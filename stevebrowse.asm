@@ -13,6 +13,7 @@
 ; This will all be eliminated when merged with Editrom Project.
 
 COLUMNS		= 80
+ROWS		= 25
 CODEBASE	= 0
 ESCCODES	= 0
 BACKARROW	= 0
@@ -28,48 +29,71 @@ BACKACTION	= 0
 
 SCREENPAGES     = 8				; 2K size for 80 col
 DIRWIDTH        = 16				; Width of directory window
-DIRHEIGHT	= 20				; Height of directory window
+DIRHEIGHT	= 18				; Height of directory window
 DIRROW		= 2				; Row for first directory line
 DIRCOL		= 2				; Column for directory listing
 IDFLAG		= 0				; Flag to add ID string
 MYDRIVE		= 8				; Default Drive Number, ie: 8
 DRIVEUNIT	= 0				; Default Unit Numberm ie: 0 or 1
+DRECLEN		= 23				; Record length for ram directory
+STATUSROW	= 23				; Location of status row
 
-;-------------- Zero Page Locations
+;======================================================================================
+; PROGRAM STORAGE LOCATIONS
+;======================================================================================
 ; $B1-$C3 used for TAPE. Safe to use here for now?
 
-SCNWID		= $B1				; Current Screen Width 
-SCNSAVE1	= $B2				; Cursor Pointer LO
-SCNSAVE2	= $B3				; Cursor Pointer HI
-SCNSAVE3	= $B4				; Cursor Column/offset
-SCNSAVE4	= $B5				; Cursor Row
-SCNMEM		= $B6				; Screen Save Buffer Pointer
-CMDMEM		= $B7				; LO Command String Buffer Pointer
-;		= $B8				; HI
+;ScrPtr		= $c4				; LO Pointer to character screen line
+;		= $c5				; HI Pointer to character screen line
+;CursorCol	= $c6				; Cursor COL - Position of cursor on above line
+;CursorRow	= $d8				; Cursor ROW
 
-;						Details for LEFT Directory
 
-LDIRMEM		= $B9				; LEFT Directory Buffer Pointer
-LDIRTOP		= $BB				; LEFT Index of Top Entry
-LDIRSEL		= $BC				; LEFT Index of selected entry
-LDIREND		= $BD				; LEFT Index of Last Entry
+SCNMEM		= $B1				; LO Screen Save Buffer Pointer
+;		= $B2				; HI
+CMDMEM		= $B3				; LO Command String Buffer Pointer
+;		= $B4				; HI
+SCNWID		= $B7				; Current Screen Width 
+CLMARGIN	= $BA				; Cursor LEFT Margin
 
-;						Details for Directory being Browsed
+;-- Details for Directory being Browsed
+DMEM		= $BB				; LO Directory Buffer Pointer
+;		= $BC				; HI
+DTOP		= $BD				; Index of Top entry
+DSEL		= $BE				; Index of Selected Entry
+DEND		= $BF				; Index of Last Entry
+DCOUNT		= $C0				; Counter for directory display
+DENTRY		= $C1				; Index of current Entry
+;last free	= $C2				; Last free
 
-DTOP		= $BE				; Index of Top entry
-DSEL		= $BF				; Index of Selected Entry
-DEND		= $C0				; Index of Last Entry
-DCOUNT		= $C1				; Counter for directory display
-DTMP		= $C2				; Temp counter
+;-- $ED-$F7 not used in 80-column machines. Safe to use here for now?
 
-; $ED-$F7 not used in 80-column machines. Safe to use here for now?
-
-ZP1		= $EE				; Source Pointer
-ZP2		= $F0				; Destination Pointer
+ZP1		= $EE				; Srce Pointer - Scn Cpy, String Print
+ZP2		= $F0				; Dest Pointer - Scn Cpy
+ZP3		= $F2				; Work Pointer - Directory display
 
 ;-------------- Memory Locations
 
 TAPEBUFFER      = $027A				; Tape buffer
+SCNSAVE1	= TAPEBUFFER+1			; Cursor Pointer LO
+SCNSAVE2	= TAPEBUFFER+2			; Cursor Pointer HI
+SCNSAVE3	= TAPEBUFFER+3			; Cursor Column/offset
+SCNSAVE4	= TAPEBUFFER+4			; Cursor Row
+
+;-- Details for LEFT Directory
+LDIRMEM		= TAPEBUFFER+5			; LO LEFT Directory Buffer Pointer
+;		= TAPEBUFFER+6			; HI
+LDIRTOP		= TAPEBUFFER+7			; LEFT Index of Top Entry
+LDIRSEL		= TAPEBUFFER+8			; LEFT Index of selected entry
+LDIREND		= TAPEBUFFER+9			; LEFT Index of Last Entry
+
+;-- Details for RIGHT Directory
+RDIRMEM		= TAPEBUFFER+10			; LO LEFT Directory Buffer Pointer
+;		= TAPEBUFFER+11			; HI
+RDIRTOP		= TAPEBUFFER+12			; LEFT Index of Top Entry
+RDIRSEL		= TAPEBUFFER+13			; LEFT Index of selected entry
+RDIREND		= TAPEBUFFER+14			; LEFT Index of Last Entry
+
 
 ;======================================================================================
 ; START OF PROGRAM CODE
@@ -80,33 +104,33 @@ TAPEBUFFER      = $027A				; Tape buffer
 
 Start:
 		JSR SaveCursorPos		; Save cursor position
-		JSR FindScnWidth		; Determine width of screen		
-		JSR InitStuff			; Do some intialization stuff		
 		JSR SaveScreen			; Save the screen to memory
+		JSR FindScnWidth		; Determine width of screen
+		
+		JSR InitStuff			; Do some intialization stuff
 		JSR DrawUI			; Draw the interface
-		JSR GetDiskStatus		; Get Disk Status 
 		JSR LoadLeftDir			; Load the directory
+		JSR ShowDirectory		; Show the directory
 		JSR GetDiskStatus		; Get Disk Status
 		JSR AnyKey			; Wait for a key
+
 		JSR RestoreScreen		; Restore the screen
 		JSR RestoreCursorPos		; Restore cursor position
 BrowseDone:	RTS
 
-;===========================================================================================
-; Subroutines - Work in Progress
-;===========================================================================================
 ;======================================================================================
 ; Init Stuff
 ;======================================================================================
-; Here we look at the BASIC pointers to figure out where we can store our data
+; Here we look at the BASIC pointers to figure out where we can store our data.
 ; STREND  pointer is the End of Array pointer which is the first address that is free
 ; FREETOP pointer is the End of RAM and is the last address we can use.
+; ** Testing phase - ignore FREETOP, max 255 entries which uses ~6K for directory.
 
 InitStuff:
 		LDX #0				; Make our data start on page boundry
 		STX SCNMEM			; LO Screen Save Address
 		STX LDIRMEM			; LO Directory Storage Address
-
+		STX CLMARGIN			; Cursor Left Margin
 		LDX STREND+1			; HI End of Arrays
 		INX				; Start on boundty of next page
 		STX SCNMEM+1			; HI Screen Save address
@@ -117,7 +141,71 @@ InitStuff:
 		
 		LDA #8				; Default Drive=8
 		STA MYDRIVE			; Set it
+
+		LDA #<TestMsg
+		LDY #>TestMsg
+		JSR STROUTZ
 		RTS
+
+TestMsg:	!PET "init complete.",13,0
+
+;======================================================================================
+; SHOW DIRECTORY
+;======================================================================================
+; Displays the directory in the proper location
+
+ShowDirectory:
+						; DEBUG************
+		LDY LDIRMEM			; LO Pointer to LEFT Directory Buffer
+		STY DMEM			; LO Pointer for Dir Memory
+		INY				; Add 2 to skip block bytes
+		INY
+		STY ZP3
+		LDY LDIRMEM+1			; HI Pointer to LEFT Directory Buffer
+		STY DMEM+1			; HI Pointer for Dir Memory
+		STY ZP3+1			; HI Work Pointer
+
+		LDY DTOP			; Top Entry
+		STY DENTRY			; Make it Current Entry
+
+		LDY #1				; Count=1 (first entry displayed)
+		STY DCOUNT			; Entry Counter
+
+SDLoop:
+;-------------- Position Cursor
+		LDA #DIRROW			; Cursor Position for Top Left
+		CLC
+		ADC DCOUNT			; Add Entry Count
+		LDY #DIRCOL
+		JSR CursorAt			; Move cursor to top of directory
+
+;-------------- Print the entry
+		LDA ZP3				; LO Work Pointer
+		LDY ZP3+1			; HI Work Pointer
+		JSR STROUTZ			; Print it, starting at <QUOTE>
+
+;		JSR ClearStatus	; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!
+;		RTS		; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+		LDA ZP3
+		CLC
+		ADC #DRECLEN			; Add record len to pointer
+		STA ZP3				; 
+		BNE SDNext			; Did it cross page? No skip ahead
+		INC ZP3+1			; Yes, inc page.
+
+SDNext:
+;		JSR ClearStatus
+;		RTS		; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!
+
+		INC DCOUNT			; 
+		LDA DCOUNT			; Get it again
+		CMP #DIRHEIGHT			; Is it at end of box?
+		BEQ SDexit
+		CMP DEND			; Is it at the end of the directory
+		BMI SDLoop			; No, Go back for more
+		
+SDexit:		RTS
 
 ;======================================================================================
 ; DRAW UI
@@ -147,11 +235,95 @@ DUIBottom:	LDA #<DirBox3
 
 DUIBar:		LDA #<KeyBar				
 		LDY #>KeyBar
-		JSR STROUTZ			; Print key bar line
+		JSR PrintAt			; Print key bar line
+
+		LDA #24				; Last ROW
+		LDY #45				; RVS Space
+		JSR FillRow			; Clear the ROW
 		RTS
 
 ;======================================================================================
-; GET USER INPUT
+; PRINT ROUTINES
+;======================================================================================
+; PrintAt:	Set .A=LO, .Y=HI address of string
+;		String:	First byte is ROW, second is COL, the rest is printed.
+; CursorAt:	Set .A=ROW, .Y=COL	- Positions cursor.
+; ClearStatus:	NONE			- Clears Status line with SPACES
+; ClearRow:	Set .A=ROW, 		- Clears the entire ROW with SPACE.
+; FillRow:	Set .A=ROW, .Y=CHR	- Clears the entire ROW with CHR.
+
+PrintAt:
+		STA ZP1					; Set LO
+		STY ZP1+1				; Set HI		
+		LDY #0					; Index at zero
+		LDA (ZP1),Y				; Get print ROW
+		STA CursorRow				; Set Cursor ROW
+		JSR IncZP1				; Advance pointer
+		LDA (ZP1),Y				; Get print COL
+		STA CursorCol				; Set Cursor COL
+		JSR IncZP1				; ZP1 now points to TEXT
+		JSR SetCursor				; Calculate cursor position
+
+		LDA ZP1					; LO
+		LDY ZP1+1				; HI
+		JMP STROUTZ				; Print it!
+
+CursorAt:	STA CursorRow				; Set ROW
+		STY CursorCol				; Set COL
+		JSR SetCursor				; Position Cursor
+		RTS
+
+SetStatus:	PHA					; Save .A and .Y
+		TYA					; onto stack
+		PHA
+		JSR ClearStatus				; Clear the Status Line
+		LDA #STATUSROW				;
+		LDY #0
+		JSR CursorAt				; Position cursor
+		PLA					; Bring back pointer to string
+		TAY
+		PLA
+		JMP STROUTZ				; Print the string
+
+ClearStatus:	LDA #STATUSROW				; Row where status messages printed		
+ClearRow:	LDY #32					; <SPACE>
+FillRow:	JSR CursorAt
+		LDA CursorCol				; Put CHR to A
+		LDY #0					; Counter
+ClearRloop	STA (ScrPtr),Y
+		INY
+		CPY SCNWID
+		BNE ClearRloop
+		RTS
+
+;======================================================================================
+; SET CURSOR
+;======================================================================================
+; Uses CursorRow to set Screen line pointer ScrPtr for printing.
+; CursorCol is used as offset
+; Messes up all registers
+; We should be able to replace this routine when integrating with Editrom!
+
+SetCursor:
+		LDY CursorRow				; Get ROW as index
+		LDA SCNWID				; Check Screen Width
+		CMP #80					; Is it 80?
+		BEQ SetC80				; Yes, skip over
+
+		LDA SLA40_Lo,Y				; Get LO from Table
+		LDX SLA40_Hi,Y				; Get HI from Table
+		BNE SetCAX
+
+SetC80:		LDA SLA80_Lo,Y				; Get LO from Table
+		LDX SLA80_Hi,Y				; Get HI from Table
+
+SetCAX:		STA ScrPtr				; Store in ScrPrt LO
+		STX ScrPtr+1				; Store in ScrPrt HI
+SetCDone:	RTS
+
+
+;======================================================================================
+; GET ANY KEY
 ;======================================================================================
 ; Wait for any key to be pressed 
 
@@ -159,34 +331,14 @@ AnyKey:		JSR GETIN			; Get keystroke to .A
 		BEQ AnyKey			; None, so loop back
 		RTS
 
-;======================================================================================
-; DEBUG STRINGS
-;======================================================================================
 
-ShowProg:	LDA #<ProgStart				
-		LDY #>ProgStart
-		JSR STROUTZ			; Print it
-		RTS
 
-ShowMarker:	LDA #<ProgMarker				
-		LDY #>ProgMarker
-		JSR STROUTZ			; Print it
-		RTS
 
-;======================================================================================
-; PRINT ROUTINES
-;======================================================================================
-; Set ZP1 to point to string. ZP2 will be updated print address
-; PrintAt: Set .X=Col (0-max), .Y=Row (0-24)
-; PrintIt: Prints from current position
-; Requires
-PrintAt:
-		
-PrintIt:
 
-;======================================================================================
+
+;**************************************************************************************
 ; DISK ROUTINES
-;======================================================================================
+;**************************************************************************************
 ;======================================================================================
 ; SEND DOS COMMAND
 ;======================================================================================
@@ -217,17 +369,14 @@ SENDCMD2	LDY #0				; always index 0
 
 SENDCMDDONE	JSR UNLSN			; un-listen
 		CLC
+		RTS
 
 ;======================================================================================
 ; GET DISK STATUS
 ;======================================================================================
 ; Read the status string: ##,String,TT,SS
 
-GetDiskStatus:	LDA #<GDS1
-		LDY #>GDS1
-		JSR STROUTZ			; debug
-
-		LDA MYDRIVE			; Current Device#
+GetDiskStatus:	LDA MYDRIVE			; Current Device#
 		STA FA				; Set device number
 		JSR TALK			; TALK
 		LDA #$6f			; Secondary Address=15
@@ -244,26 +393,28 @@ GS_DONE		jsr SCROUT			; write <CR> to screen
 		jsr UNTLK			; UNTALK
 		RTS				; jmp READY ; Back to BASIC
 
-GDS1:		!PET "drive status: ",0
-
 ;======================================================================================
 ; LOAD LEFT/RIGHT DIRECTORY
 ;======================================================================================
 ; Sets up pointers for LEFT/RIGHT directory
-; !!!! For now they will use the same memory
+; Initialize pointers for TOP,SEL,END,COUNT
 
 LoadLeftDir:
-		LDA #0				; Counter
-		STA LDIRTOP			; Start at Top of List
-		STA LDIRSEL			; Selected at top
-
-		LDA LDIRMEM			; LO Directory Storage Address
-		STA ZP1				; LO Pointer
-		LDA LDIRMEM+1			; HI Directory Storage Address
+		LDA LDIRMEM			; LO Pointer to Directory Storage Address
+		STA ZP1				; LO
+		LDA LDIRMEM+1			; HI Pointer to Directory Storage Address
 		STA ZP1+1			; HI Pointer
+
 		JSR LoadDirectory		; Read directory to memory, count entries
-		LDA DTMP			; Load # of entries in directory
-		STA LDIREND			; Save it for LEFT				; TODO: save the end address here
+
+		LDA DTOP			; Now we copy results back to LEFT DIR
+		STA LDIRTOP			; Start at Top of List
+		LDA DSEL
+		STA LDIRSEL			; Selected at top
+		LDA DEND
+		STA LDIREND			; End of directory
+		LDA DCOUNT
+		STA LDIREND			; Number of entries in directory			; TODO: save the end address here
 		RTS
 
 ;======================================================================================
@@ -274,6 +425,16 @@ LoadLeftDir:
 
 ;-------------- Prep
 LoadDirectory:
+		LDA #0				; Clear pointers
+		STA DTOP			; Index of Top entry
+		STA DSEL			; Index of Selected Entry
+		STA DEND			; Index of Last Entry
+		STA DCOUNT			; Counter for directory display
+		
+		LDA #<ReadingDir		; Print "Reading.."
+		LDY #>ReadingDir
+		JSR SetStatus
+
 		LDA #<FNDirectory		; LO Pointer to Filename ("$0")
 		STA FNADR			; LO Filename Address pointer
 		LDA #>FNDirectory		; HI
@@ -283,7 +444,7 @@ LoadDirectory:
 
 		LDA #0				; Clear the status byte
 		STA STATUS
-		STA DTMP			; Zero the entry counter
+		STA DCOUNT			; Zero the entry counter
 
 		LDA #$60			; DATA SA 0
 		STA SA
@@ -351,22 +512,22 @@ BlocksFree:	JSR GetStor			; Get and store text
 
 ;-------------- Line is complete
 
-Entry_done:	LDA DTMP			; Get Counter
+Entry_done:	LDA DCOUNT			; Get Counter
 		CMP #255			; Is it 255?
 		BEQ StopListing			; Yes, Maximum entries, so exit
-		INC DTMP			; Counter=Counter+1
+		INC DCOUNT			; Counter=Counter+1
 		JMP LoadEntry			; No, Jump back for more lines
 
 ;-------------- Listing is complete
 
 StopListing:	JSR CLSEI			; close file with $E0, unlisten
-		LDA #<TEMP2			; debug "Reading:"
-		LDY #>TEMP2
-		JSR STROUTZ			; debug print it
-		RTS
+		LDA #<DirLoaded
+		LDY #>DirLoaded
+		JMP SetStatus
 
-;-------------- Directory Read and Store Routine / ZP1 store
-; Four entry points:
+
+;-------------- Directory Read / Discard / Store, and Pointer Update ZP1
+; Five entry points:
 ; 1: Read two Directory bytes and discard (DD)
 ; 2: Read one Directory byte  and discard (D)
 ; 3: Read one Directory byte to .A
@@ -378,10 +539,14 @@ DGetStor:	JSR ACPTR			; Get and ignore
 GetStor:	JSR ACPTR			; Get a byte
 StorIt:		LDY #0				; Ensure offset is 0
 		STA (ZP1),Y			; Store it
+
+;-------------- Increment ZP1 Pointer
+
 IncZP1:		INC ZP1				; Increment pointer LO
-		BNE IncDone
+		BNE IncZP1X
 		INC ZP1+1			; Increment pointer HI
-IncDone:	RTS		
+IncZP1X:	RTS		
+
 
 ;======================================================================================
 ; LOAD / RUN
@@ -419,24 +584,20 @@ loaderr		jmp FILENOTFOUND		; FILE NOT FOUND, return to basic
 
 
 
-
-
-
-
-
 ;**************************************************************************************
 ; Routines that are working
 ;**************************************************************************************
 ;======================================================================================
 ; FIND SCREEN WIDTH
 ;======================================================================================
-; This routine prints <HOME><HOME><DOWN> using the standard PET print routines.
-; It does not disturb the screen. <HOME><HOME> cancels any windowing.
-; This will place the cursor on the second line. The screen line pointer will be set
-; and the LO byte will be 40 or 80.
-;>>>>>>> Will linked lines affect result?
+; This routine prints "<HOME><HOME><CLS><DOWN>" using the standard PET print routines.
+; The <HOME><HOME> cancels any windowing, <CLS> Clears the screen and 40-col line links.
+; The <DOWN> moves to the second line and the screen line pointer will be set, with the
+; LO byte equal to 40 or 80 (points to $8028 or $8050).
+; *** We can probably eliminate this when integrated into Editrom!
 
-FindScnWidth:	LDA #<HomeHome			; Address of string to print
+FindScnWidth:
+		LDA #<HomeHome			; Address of string to print
 		LDY #>HomeHome
 		JSR STROUTZ			; Use standard system print routine
 		LDA ScrPtr			; LO of Start of Line Address
@@ -494,13 +655,13 @@ CopyLoop:	LDA (ZP1),Y			; Read byte
 ;======================================================================================
 ; Saves or Restores the cursor position
 
-SaveCursorPos:	LDA ScrPtr			; $C4/C5 - pointer to screen line
+SaveCursorPos:	LDA ScrPtr			; Pointer to screen line
 		STA SCNSAVE1
 		LDA ScrPtr+1
 		STA SCNSAVE2
-		LDA CursorCol			; $C6 - position of cursor on line
+		LDA CursorCol			; Position of cursor on line
 		STA SCNSAVE3
-		LDA CursorRow			; $D8 - line where cursor lived
+		LDA CursorRow			; Line where cursor lives
 		STA SCNSAVE4
 		RTS
 
@@ -521,7 +682,7 @@ RestoreCursorPos:
 
 ;-------------- User Interface
 
-TitleBar:	!PET 147,18,"stevebrowse 2021-04-05                  ",13,0	; Top Line Titlebar
+TitleBar:	!PET 147,18,"stevebrowse 2021-04-07                  ",13,0	; Top Line Titlebar
 DirBox1:	!BYTE $B0					; Top Left Corner
 		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
 		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
@@ -531,33 +692,18 @@ DirBox3:	!BYTE $AD					; Bottom Left Corner
 		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
 		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
 		!BYTE $BD,13,0					; Bottom Right Corner, CR
-KeyBar:		!PET "up/dn=sel,return=run/cd, r=root",19,13,0	; Keys <home> - NO CR
+KeyBar:		!BYTE 5,40 ;ROW/COL
+		!PET "up/dn=sel,return=run/cd, r=root",19,13,0	; Keys <home> - NO CR
 
 ;-------------- 
-HomeHome:	!BYTE 19,19,17,0				; WAS: 147,13,46,0				; CLS, CR, PERIOD
-FNDirectory:	!PET "$1",0					; Directory string
-AreUSure:	!PET "are you sure (y/n)?",0			; Confirm
+HomeHome:	!BYTE 19,19,147,17,0				; <HOME><HOME><CLS><DOWN>
+FNDirectory:	!PET "$0",0					; Directory string
 
-;======================================================================================
-; SCREEN LINE ADDRESS TABLE
-;======================================================================================
-; This is a table of screen line addresses, representing the address of the start of each line.
-; There are 50 entries for both HI and LO bytes. Each pair is offset 40 bytes so when
-; calculating start lines for 80 column you must multiply ROW by 2.
-;
-;SLALO:		!byte $00,$28,$50,$78,$a0,$c8,$f0,$18,$40,$68
-;		!byte $90,$b8,$e0,$08,$30,$58,$80,$a8,$d0,$f8
-;		!byte $20,$48,$70,$98,$c0,$e8,$10,$38,$60,$88
-;		!byte $B0,$d8,$00,$28,$50,$78,$a0,$c8,$f0,$18
-;		!byte $40,$68,$90,$b8,$e0,$08,$30,$58,$80,$a8
-;		!byte $d0
-;
-;SLAHI:		!byte $80,$80,$80,$80,$80,$80,$80,$81,$81,$81
-;		!byte $81,$81,$81,$82,$82,$82,$82,$82,$82,$82
-;		!byte $83,$83,$83,$83,$83,$83,$84,$84,$84,$84
-;		!byte $84,$84,$85,$85,$85,$85,$85,$85,$85,$86
-;		!byte $86,$86,$86,$86,$86,$87,$87,$87,$87,$87
-;		!byte $87
+AreUSure:	!PET "are you sure (y/n)?",0
+ReadingDir:	!PET "reading directory...",0		
+DirLoaded:	!PET "directory loaded: ",0
+Copying		!PET "copying...",0
+Renaming:	!PET "renaming...",0
 
 ;======================================================================================
 ; Init Stuff
@@ -595,8 +741,29 @@ ProgMarker	!PET "!",0					; DEBUG Marker
 
 ;-------------- DEBUG Strings
 
-TEMP1:		!PET 13,"reading: ",0
-TEMP2:		!PET 13,"directory loaded",13,0
+;======================================================================================
+; SCREEN LINE ADDRESS TABLE
+;======================================================================================
+; These are tables representing the address of the start of each screen line for both
+; 40 and 80 column wide screens. Screen width is determined at the start of the program
+; and stored in SCNWID.
+;
+;---------- 40 characters wide 
+SLA40_Lo	!byte $00,$28,$50,$78,$a0,$c8,$f0,$18,$40,$68,$90,$b8,$e0
+		!byte $08,$30,$58,$80,$a8,$d0,$f8,$20,$48,$70,$98,$c0
+
+SLA40_Hi	!byte $80,$80,$80,$80,$80,$80,$80,$81,$81,$81,$81,$81,$81
+		!byte $82,$82,$82,$82,$82,$82,$82,$83,$83,$83,$83,$83
+
+;---------- 80 characters wide 
+SLA80_Lo	!byte $00,$50,$a0,$f0,$40,$90,$e0,$30,$80,$d0,$20,$70,$c0
+		!byte $10,$60,$b0,$00,$50,$a0,$f0,$40,$90,$e0,$30,$80
+
+SLA80_Hi	!byte $80,$80,$80,$80,$81,$81,$81,$82,$82,$82,$83,$83,$83
+		!byte $84,$84,$84,$85,$85,$85,$85,$86,$86,$86,$87,$87
+
+
+
 
 ;======================================================================================
 ; PADD to 4K to be able to load into VICE
