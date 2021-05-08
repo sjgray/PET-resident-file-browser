@@ -201,9 +201,31 @@ ShowDEBUG:	INC DEBUGRAM
 		STY DEBUGRAM+8
 		RTS
 
+;======================================================================================
+; CLEAR ACTIVE DIRECTORY AREA
+;======================================================================================
+; Clears current directory area in preparation for new (shorter) directory
+
+ClearDArea:	LDX DROW			; Top ROW of directory
+		STX DENTRY			;
+		LDX #255				; Count
+		STX DCOUNT			;
+
+ClearDAloop:	LDY #19				; No Entry string
+		LDX DCOUNT			; Get the Count
+		CPX #DIRHEIGHT			; Is it at the end?		
+		BEQ ClearDAexit
+		LDX DENTRY
+		LDA DCOL			; Directory column
+		JSR PrintAtNM			; Print Msg#=.Y at Row=.X, Col=.Y
+		INC DENTRY			; Next Row
+		INC DCOUNT			; Next Count
+		JMP ClearDAloop
+ClearDAexit:	RTS	
+
 
 ;======================================================================================
-; Interactive 
+; INTERACTIVE
 ;======================================================================================
 ; This is the main code that runs to interact with the program features. It reads
 ; keystrokes and acts on them, looping around until user exits.
@@ -464,20 +486,14 @@ GetCurrent:	LDA #<DMEMHI
 		LDX #0
 		RTS
 
-GetActive:	LDA #1				; "A" DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-		STA DEBUGRAM+10
-		LDA ACTIVE
+GetActive:	LDA ACTIVE
 		BNE GetRight
 
-GetLeft:	LDA #12				; "L" DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-		STA DEBUGRAM+11
-		LDA #<LEFTMEM			; HI Location of LEFT storage memory
+GetLeft:	LDA #<LEFTMEM			; HI Location of LEFT storage memory
 		LDX #>LEFTMEM			; LO (never zero)
 		RTS
 
-GetRight:	LDA #18				; "R" DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-		STA DEBUGRAM+12
-		LDA #<RIGHTMEM			; HI Location of LEFT storage memory
+GetRight:	LDA #<RIGHTMEM			; HI Location of LEFT storage memory
 		LDX #>RIGHTMEM			; LO
 		RTS
 
@@ -747,7 +763,9 @@ PrepCommon:	STA DMEMHI
 ; FNLEN must be set to length of string.-----------> To be fixed
 ; Counts # of directory entries to DCOUNT.
 
-LoadDirectory:	LDA DUNIT			; Get the UNIT
+LoadDirectory:
+		JSR ClearDArea
+		LDA DUNIT			; Get the UNIT
 		BNE SetD1			; If not zero, skip ahead
 
 SetD0:		LDA #<FNDir0			; LO Pointer to Filename ("$0")		
@@ -790,7 +808,6 @@ PrepDev:	STA FNADR			; LO Filename Address pointer
 		LDA SA				; Secondary Address
 		JSR SECND			; Set Secondary Address
 		LDX STATUS
-		STX SCREEN_RAM+50		; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 		BNE LDError
 
 SkipLA:		JSR ACPTR			; Read two bytes Load Address
@@ -1036,7 +1053,6 @@ AnyKey:		JSR GETIN				; Get keystroke to .A
 AskDevice:	LDY #3					; Point to Prompt
 		JSR ClearKeyNM				; Print the message
 AskDloop	JSR AnyKey				; Get ANY Key
-		STA SCREEN_RAM+70			; DEBUG!!!!!!!!!!!!!!!!!!!		
 		CMP #3					; Is it Stop
 		BEQ AskAbort				; Yes, abort
 		CMP #48					; Is it "0"?
@@ -1048,7 +1064,6 @@ AskDloop	JSR AnyKey				; Get ANY Key
 		BPL NoAdj				; more, skip ahead
 		ADC #11					; less, Add 10 (0 to 7 -> 10 to 17)
 NoAdj:		SBC #48					; Subtract 48 - Device# in .A
-		STA SCREEN_RAM+71			; DEBUG!!!!!!!!!!!!!!!!!!!
 		RTS 
 
 ;======================================================================================
@@ -1269,11 +1284,11 @@ PNMexit:	RTS
 
 NMAdLo:	!BYTE <NM0,<NM1,<NM2,<NM3,<NM4,<NM5,<NM6,<NM7		; 0-7
 	!BYTE <NM8,<NM9,<NM10,<NM11,<NM12,<NM13,<NM14,<NM15	; 8-15
-	!BYTE <NM16,<NM17						; 16-
+	!BYTE <NM16,<NM17,<NM18,<NM19				; 16-
 
 NMAdHi:	!BYTE >NM0,>NM1,>NM2,>NM3,>NM4,>NM5,>NM6,>NM7		; 0-7
 	!BYTE >NM8,>NM9,>NM10,>NM11,>NM12,>NM13,>NM14,>NM15	; 8-15
-	!BYTE >NM16,>NM17					; 16-
+	!BYTE >NM16,>NM17,>NM18,>NM19				; 16-
 
 NM0:	!BYTE 0						; For print@ 
 NM1:	!BYTE 19,19,147,17,0				; <HOME><HOME><CLS><DOWN>
@@ -1306,7 +1321,8 @@ NM14:	!PET "stevebrowse 2021-04-20",0 		; Title text
 NM15:   !PET "dev:xx unit:x ",0				; Device# and Unit# display
 NM16:	!PET "hit '/' to select!",0			;
 NM17:	!PET "ds: ",0					; Disk Status
-
+NM18:	!PET "no directory",0				; No Directory
+NM19:	!PET "                     ",0			; Blank dir entry
 
 ;======================================================================================
 ; SCREEN LINE ADDRESS TABLE
