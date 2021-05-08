@@ -1,13 +1,10 @@
-; PET/CBM EDIT ROM - File Browser and Utility  - Started March 25, 2021
-; ===========================================  - Updated: 2021-04-04
+; PET/CBM EDIT ROM - File Browser and Utility  (C)2021 Steve J. Gray
+; ===========================================  
+; - Started March 25, 2021
+; - Updated: 2021-04-07
 ;
 ; A File Browser Utility that can be included in Editor ROM or Option ROM.
 ;
-; ITEMS TODO:
-; -Directory loading to RAM
-; -Directory display
-; -Print at function and direct write to screen
-
 ;-------------- Includes
 ; includes from editrom project. Need to fool it, so define a few things first.
 ; This will all be eliminated when merged with Editrom Project.
@@ -104,33 +101,26 @@ RDIREND		= TAPEBUFFER+14			; LEFT Index of Last Entry
 *=$A000						; Put this in the $A Option ROM
 
 Start:
-		JSR SaveCursorPos		; Save cursor position
-
-		LDA #<TestMsg1
-		LDY #>TestMsg1
-		JSR STROUTZ
-
-		JSR SaveScreen			; Save the screen to memory
-
-		LDA #<TestMsg2
-		LDY #>TestMsg2
-		JSR STROUTZ
-
-		JSR FindScnWidth		; Determine width of screen		
 		JSR InitStuff			; Do some intialization stuff
+		JSR SaveCursorPos		; Save cursor position
+		JSR SaveScreen			; Save the screen to memory
+		JSR FindScnWidth		; Determine width of screen
+		
 		JSR DrawUI			; Draw the interface
 		JSR LoadLeftDir			; Load the directory
-		JSR ShowDirectory		; Show the directory
+		JSR ShowLeftDir			; Show the directory
 		JSR GetDiskStatus		; Get Disk Status
-		JSR AnyKey			; Wait for a key
 
-;		JSR RestoreScreen		; Restore the screen
-;		JSR RestoreCursorPos		; Restore cursor position
+		JSR AnyKey			; Wait for a key
+		JSR RestoreScreen		; Restore the screen
+		JSR RestoreCursorPos		; Restore cursor position
 BrowseDone:	RTS
 
-TestMsg1:	!PET "[test1]",13,0
-TestMsg2:	!PET "[test2]",13,0
-TestMsg3:	!PET "[test3]",13,0
+TestMsg1:	!PET "[start1]",13,0
+TestMsg2:	!PET "[start2]",13,0
+TestMsg3:	!PET "[initdone]",13,0
+TestMsg4:	!PET "[copyscreen]",13,0
+
 ;======================================================================================
 ; Init Stuff
 ;======================================================================================
@@ -139,8 +129,7 @@ TestMsg3:	!PET "[test3]",13,0
 ; FREETOP pointer is the End of RAM and is the last address we can use.
 ; ** Testing phase - ignore FREETOP, max 255 entries which uses ~6K for directory.
 
-InitStuff:
-		LDX #0				; Make our data start on page boundry
+InitStuff:	LDX #0				; Make our data start on page boundry
 		STX SCNMEM			; LO Screen Save Address
 		STX LDIRMEM			; LO Directory Storage Address
 		STX CLMARGIN			; Cursor Left Margin
@@ -154,10 +143,6 @@ InitStuff:
 		
 		LDA #8				; Default Drive=8
 		STA MYDRIVE			; Set it
-
-		LDA #<TestMsg3
-		LDY #>TestMsg3
-		JSR STROUTZ
 		RTS
 
 
@@ -166,24 +151,30 @@ InitStuff:
 ;======================================================================================
 ; Displays the directory in the proper location
 
-ShowDirectory:
+ShowLeftDir:
 						; DEBUG************
 		LDY LDIRMEM			; LO Pointer to LEFT Directory Buffer
 		STY DMEM			; LO Pointer for Dir Memory
 		INY				; Add 2 to skip block bytes
 		INY
-		STY ZP3
+		STY ZP3				; LO Work Pointer
 		LDY LDIRMEM+1			; HI Pointer to LEFT Directory Buffer
 		STY DMEM+1			; HI Pointer for Dir Memory
 		STY ZP3+1			; HI Work Pointer
 
 		LDY DTOP			; Top Entry
 		STY DENTRY			; Make it Current Entry
+		LDY LDIREND
+		STY DEND
 
-		LDY #1				; Count=1 (first entry displayed)
+		LDY #0				; Count=1 (first entry displayed)
 		STY DCOUNT			; Entry Counter
 
 SDLoop:
+		INC DCOUNT
+		LDA DCOUNT			
+		STA SCREEN_RAM			; DEBUG
+		
 ;-------------- Position Cursor
 		LDA #DIRROW			; Cursor Position for Top Left
 		CLC
@@ -192,67 +183,30 @@ SDLoop:
 		JSR CursorAt			; Move cursor to top of directory
 
 ;-------------- Print the entry
+		ldy #0
+		lda #'!'
+		sta (ZP3),Y
 		LDA ZP3				; LO Work Pointer
 		LDY ZP3+1			; HI Work Pointer
 		JSR STROUTZ			; Print it, starting at <QUOTE>
 
-;		JSR ClearStatus	; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!
-;		RTS		; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-		LDA ZP3
+SDnext:		LDA ZP3
 		CLC
 		ADC #DRECLEN			; Add record len to pointer
 		STA ZP3				; 
 		BNE SDNext			; Did it cross page? No skip ahead
 		INC ZP3+1			; Yes, inc page.
 
-SDNext:
-;		JSR ClearStatus
-;		RTS		; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!
-
-		INC DCOUNT			; 
-		LDA DCOUNT			; Get it again
+SDNext:		LDA DCOUNT			; Get it again
 		CMP #DIRHEIGHT			; Is it at end of box?
 		BEQ SDexit
 		CMP DEND			; Is it at the end of the directory
-		BMI SDLoop			; No, Go back for more
-		
+		BNE SDLoop			; No, Go back for more
+
+		JSR ClearStatus
+	
 SDexit:		RTS
 
-;======================================================================================
-; DRAW UI
-;======================================================================================
-; Draw Titlebar, box for the filenames and key help line
-
-DrawUI:		LDA #<TitleBar				
-		LDY #>TitleBar
-		JSR STROUTZ			; Print the titlebar
-
-		LDA #<DirBox1
-		LDY #>DirBox1
-		JSR STROUTZ			; Print top line
-
-		LDA #DIRHEIGHT			; Height of Dir Box
-		STA ZP1				; Save it
-
-DUILoop:	LDA #<DirBox2
-		LDY #>DirBox2
-		JSR STROUTZ			; Print middle line
-		DEC ZP1				; Decrement Counter
-		BNE DUILoop			; Go back for more
-
-DUIBottom:	LDA #<DirBox3
-		LDY #>DirBox3
-		JSR STROUTZ			; Print bottom line
-
-DUIBar:		LDA #<KeyBar				
-		LDY #>KeyBar
-		JSR PrintAt			; Print key bar line
-
-		LDA #24				; Last ROW
-		LDY #45				; RVS Space
-		JSR FillRow			; Clear the ROW
-		RTS
 
 ;======================================================================================
 ; PRINT ROUTINES
@@ -645,7 +599,12 @@ RestoreScreen:	LDA SCNMEM			; LO Source address
 ;======================================================================================
 ; ZP1 and ZP2 are set, so set .X and fall into copy routine below
 
-CopyScreen:	LDX #SCREENPAGES		; How many pages to copy? 8=2K
+CopyScreen:
+		LDA #<TestMsg4
+		LDY #>TestMsg4
+		JSR STROUTZ
+
+		LDX #SCREENPAGES		; How many pages to copy? 8=2K
 
 ;-------------- BLOCK COPY
 ; Copies .X pages from source ZP1 to destination ZP2
@@ -689,6 +648,41 @@ RestoreCursorPos:
 		RTS
 
 ;======================================================================================
+; DRAW UI
+;======================================================================================
+; Draw Titlebar, box for the filenames and key help line
+
+DrawUI:		LDA #<TitleBar				
+		LDY #>TitleBar
+		JSR STROUTZ			; Print the titlebar
+
+		LDA #<DirBox1
+		LDY #>DirBox1
+		JSR STROUTZ			; Print top line
+
+		LDA #DIRHEIGHT			; Height of Dir Box
+		STA ZP1				; Save it
+
+DUILoop:	LDA #<DirBox2
+		LDY #>DirBox2
+		JSR STROUTZ			; Print middle line
+		DEC ZP1				; Decrement Counter
+		BNE DUILoop			; Go back for more
+
+DUIBottom:	LDA #<DirBox3
+		LDY #>DirBox3
+		JSR STROUTZ			; Print bottom line
+
+DUIBar:		LDA #<KeyBar				
+		LDY #>KeyBar
+		JSR PrintAt			; Print key bar line
+
+		LDA #24				; Last ROW
+		LDY #45				; RVS Space
+		JSR FillRow			; Clear the ROW
+		RTS
+
+;======================================================================================
 ; DATA TABLES
 ;======================================================================================
 
@@ -696,15 +690,15 @@ RestoreCursorPos:
 
 TitleBar:	!PET 147,18,"stevebrowse 2021-04-07                  ",13,0	; Top Line Titlebar
 DirBox1:	!BYTE $B0					; Top Left Corner
-		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
-		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
+		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
+		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
 		!BYTE $AE,13,0					; Top Right Corner, CR
-DirBox2:	!PET  $DD,"                  ",$DD,13,0		; Centre line
+DirBox2:	!PET  $DD,"                    ",$DD,13,0	; Centre line
 DirBox3:	!BYTE $AD					; Bottom Left Corner
-		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
-		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
+		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
+		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
 		!BYTE $BD,13,0					; Bottom Right Corner, CR
-KeyBar:		!BYTE 5,40 ;ROW/COL
+KeyBar:		!BYTE 5,30 ;ROW/COL
 		!PET "up/dn=sel,return=run/cd, r=root",19,13,0	; Keys <home> - NO CR
 
 ;-------------- 
@@ -760,7 +754,8 @@ ProgMarker	!PET "!",0					; DEBUG Marker
 ; 40 and 80 column wide screens. Screen width is determined at the start of the program
 ; and stored in SCNWID.
 ;
-;---------- 40 characters wide 
+;---------- 40 characters wide
+ 
 SLA40_Lo	!byte $00,$28,$50,$78,$a0,$c8,$f0,$18,$40,$68,$90,$b8,$e0
 		!byte $08,$30,$58,$80,$a8,$d0,$f8,$20,$48,$70,$98,$c0
 
@@ -768,6 +763,7 @@ SLA40_Hi	!byte $80,$80,$80,$80,$80,$80,$80,$81,$81,$81,$81,$81,$81
 		!byte $82,$82,$82,$82,$82,$82,$82,$83,$83,$83,$83,$83
 
 ;---------- 80 characters wide 
+
 SLA80_Lo	!byte $00,$50,$a0,$f0,$40,$90,$e0,$30,$80,$d0,$20,$70,$c0
 		!byte $10,$60,$b0,$00,$50,$a0,$f0,$40,$90,$e0,$30,$80
 
