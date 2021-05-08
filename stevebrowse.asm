@@ -53,6 +53,7 @@ SCNMEM		= $B1				; LO Screen Save Buffer Pointer
 ;		= $B2				; HI
 CMDMEM		= $B3				; LO Command String Buffer Pointer
 ;		= $B4				; HI
+
 SCNWID		= $B7				; Current Screen Width 
 CLMARGIN	= $BA				; Cursor LEFT Margin
 
@@ -104,9 +105,18 @@ RDIREND		= TAPEBUFFER+14			; LEFT Index of Last Entry
 
 Start:
 		JSR SaveCursorPos		; Save cursor position
+
+		LDA #<TestMsg1
+		LDY #>TestMsg1
+		JSR STROUTZ
+
 		JSR SaveScreen			; Save the screen to memory
-		JSR FindScnWidth		; Determine width of screen
-		
+
+		LDA #<TestMsg2
+		LDY #>TestMsg2
+		JSR STROUTZ
+
+		JSR FindScnWidth		; Determine width of screen		
 		JSR InitStuff			; Do some intialization stuff
 		JSR DrawUI			; Draw the interface
 		JSR LoadLeftDir			; Load the directory
@@ -114,10 +124,13 @@ Start:
 		JSR GetDiskStatus		; Get Disk Status
 		JSR AnyKey			; Wait for a key
 
-		JSR RestoreScreen		; Restore the screen
-		JSR RestoreCursorPos		; Restore cursor position
+;		JSR RestoreScreen		; Restore the screen
+;		JSR RestoreCursorPos		; Restore cursor position
 BrowseDone:	RTS
 
+TestMsg1:	!PET "[test1]",13,0
+TestMsg2:	!PET "[test2]",13,0
+TestMsg3:	!PET "[test3]",13,0
 ;======================================================================================
 ; Init Stuff
 ;======================================================================================
@@ -142,12 +155,11 @@ InitStuff:
 		LDA #8				; Default Drive=8
 		STA MYDRIVE			; Set it
 
-		LDA #<TestMsg
-		LDY #>TestMsg
+		LDA #<TestMsg3
+		LDY #>TestMsg3
 		JSR STROUTZ
 		RTS
 
-TestMsg:	!PET "init complete.",13,0
 
 ;======================================================================================
 ; SHOW DIRECTORY
