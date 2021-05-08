@@ -1,7 +1,7 @@
 ; PET/CBM EDIT ROM - File Browser and Utility  (C)2021 Steve J. Gray, March 25/2021
 ; ===========================================  Updated: 2021-04-11
 ;
-; A File Browser Utility for Option ROM or (hopefully) Editor ROM.
+; A File Browser Utility for Option ROM or Editor ROM.
 ;
 ;-------------- Includes
 ; includes from editrom project. Need to fool it, so define a few things first.
@@ -35,10 +35,11 @@ MYDRIVE		= 8				; Default Drive Number, ie: 8
 DRIVEUNIT	= 0				; Default Unit Numberm ie: 0 or 1
 DRECLEN		= 23				; Record length for ram directory
 
-DEBUGRAM	= SCREEN_RAM+21*80		; Address  of Debug       ROW
+DEBUGRAM	= SCREEN_RAM+24*80+70		; Address  of Debug       ROW
 
-DSROW		= 22				; Location of Disk Status ROW
-MSGROW		= 23				; Location of Info Status ROW
+PROGROW		= 20				; Location of Progress    ROW
+DSROW		= 21				; Location of DiskST/File ROW
+MSGROW		= 22				; Location of Info Status ROW
 HELPROW		= 24				; Location of HELP keys   ROW
 
 RVS		= 18				; <RVS>
@@ -149,11 +150,11 @@ Start:
 		JSR DrawUI			; Draw the interface
 
 		JSR LoadLeftDir			; Load the LEFT directory		
-;		JSR LoadRightDir		; Load the RIGHT directory
-;		JSR ShowRightDir		; Show the RIGHT directory
+		JSR LoadRightDir		; Load the RIGHT directory
+		JSR ShowRightDir		; Show the RIGHT directory
 		JSR ShowLeftDir			; Show the LEFT directory
 
-;		JSR GetDiskStatus		; Get Disk Status
+		JSR GetDiskStatus		; Get Disk Status
 
 		JSR Interact			; The Main Code. Loops until Exit.
 BrowseDone:	RTS				; Exit Program
@@ -219,7 +220,7 @@ ShowPET:	JSR RestoreScreen		; Restore the screen
 
 ;-------------- Exit Program
 
-IsExit:		JSR SurePrompt			; Prompt to Exit
+IsExit:		JSR AskSure			; Prompt to Exit
 		CMP #89				; Is it "Y"?
 		BNE ILoopStat			; No, continue
 		JMP ShowPET			; Yes, Restore screen, cursor, then Exit!
@@ -324,6 +325,7 @@ IPUfull:	SBC #DIRHEIGHT			; Subtract height of display box
 ;-------------- Perform Select Directory LEFT/RIGHT
 
 IsSlash:
+		JMP ILoop
 		LDA ACTIVE			; Active Directory (0=LEFT,1=RIGHT)
 		CMP #0				; Left Side?
 		BNE RightAct			; No, Right is active
@@ -337,24 +339,60 @@ RightAct:
 ;-------------- Perform Load new Drive/Unit
 
 IsCLS:
+		JSR AskDevice			; Ask and input Device#. Returns 8-15 in .A
+		BEQ CLSabort
+		JSR AskUnit			; Ask and input Unit#. Returns 0 or 1
+CLSabort:	JMP ILoopStat			; Return and clear status line
+
 
 ;-------------- Perform RETURN
 
 IsRETURN:
 		LDY #19				; Index to FILETYPE Character
-		LDA (DSEL),Y			; Get the FILETYPE
-		CMP #80				; "P"?
+		LDA (DSELMEM),Y			; Get the FILETYPE
+		STA DEBUGRAM+9			; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+		CMP #80				; "P"? - PRG file
 		BEQ LoadPRG			; Yes, Load the file
-		CMP #68				; "D"?
-		BEQ ChangeDIR			; Yes, Change Director
-		
+		CMP #67				; "D"? - DIR file
+		BEQ ChangeDIR			; Yes, Change Directory
 		JMP IRefresh
 
-LoadPRG:
-ChangeDIR:
-		
-;-------------- We are lost... for now
+;-------------- Do File Load
 
+LoadPRG:	LDA #<LoadPrompt		; point to prompt
+		LDY #>LoadPrompt		
+		JSR AskSure			; Are you sure?
+		BNE LPgo
+		JMP ILoopStat
+
+LPgo:		LDA #<DLoadPrep			; Pre-filename string <CLS>dL<QUOTE>
+		LDY #>DLoadPrep
+		JSR STROUTZ			; Print the string
+		LDA #34				; <QUOTE>
+		JSR $FFD2			; Print it
+ 	
+		LDY #1				; First character after quote
+LPloop:		LDA (DSELMEM),Y			; Get character
+		INY				; move ahead
+		JSR $FFD2			; Print it
+		CMP #34				; Is it <QUOTE>?		
+		BNE LPloop			; No, loop back for more
+
+LPpost:		LDA #<DLoadPost			; Post-filename string <QUOTE>,D0 ON U8<CR><CR>
+		LDY #>DLoadPost
+		JSR STROUTZ			; Print the string
+
+		LDA #19				; Home
+		STA $026F			; First byte of keyboard buffer
+		LDA #13				; <CR>
+		STA $0270			; Second byte of keyboard buffer
+		LDA #2				
+		STA $9E				; # of chrs in keyboard buffer
+		RTS				; Exit program
+ 	
+;-------------- Do Change Dir
+
+ChangeDIR:
 		JMP IRefresh
 
 ;======================================================================================
@@ -381,6 +419,63 @@ SDZskip:	DEY				;
 		BNE SetDZloop			; Loop back
 SetDZX:		RTS
 		
+
+;======================================================================================
+; PROMPT FOR DRIVE DEVICE NUMBER
+;======================================================================================
+; Prompt for Drive Device Number. Accepts 0-9 or STOP=Abort. 0-7 are treated as 10-17.
+
+AskDevice:	LDA #<DevPrompt				; Point to Prompt
+		LDY #>DevPrompt
+		JSR PrintMsg				; Print the message
+AskDloop	JSR AnyKey				; Get ANY Key		
+		CMP #3					; Is it Stop
+		BEQ AskAbort				; Yes, abort
+		CMP #48					; Is it "0"?
+		BMI AskDloop				; less, not valid
+		CMP #57					; "9"?
+		BPL AskDloop				; greater, not valid
+		CLC
+		CMP #56					; Is it "7"?
+		BPL NoAdj				; more, skip ahead
+		ADC #10					; less, Add 10 (0 to 7 -> 10 to 17)
+NoAdj:		SBC #48					; Subtract 48 - Device# in .A
+		RTS 
+
+;======================================================================================
+; PROMPT FOR DRIVE UNIT NUMBER
+;======================================================================================
+; Prompt for Drive Unit Number. Accepts 0-1 or STOP=Abort
+
+AskUnit:	LDA #<UnitPrompt			; Point to Prompt
+		LDY #>UnitPrompt
+		JSR PrintMsg				; Print the message
+AskUloop:	JSR AnyKey				; Get ANY Key		
+		CMP #3					; Is it Stop
+		BEQ AskAbort				; Yes, abort
+		CMP #48					; Is it "0"?
+		BMI AskUloop				; less, not valid
+		CMP #49					; "1"?
+		BPL AskUloop				; greater, not valid
+		CLC
+		SBC #48					; Subtract 48 - Device# in .A
+		RTS
+
+AskAbort:	LDA #0					; Return a NULL
+		RTS
+
+;======================================================================================
+; CONFIRM (Y/N) + AnyKey 
+;======================================================================================
+; Display confirmation then wait for ANY KEY - No validation done
+; Answer returned in .A
+
+AskSure:	LDA #<YesNoPrompt			; Point to Prompt
+		LDY #>YesNoPrompt
+		JSR PrintMsg				; Print the Message
+AnyKey:		JSR GETIN				; Get keystroke to .A
+		BEQ AnyKey				; None, so loop back
+		RTS
 
 ;======================================================================================
 ; SETUP FOR LEFT/RIGHT DIRECTORY
@@ -516,6 +611,7 @@ SDexit:		DEC DBOT			; adjust
 ; PrintAt:	Set .A=LO, .Y=HI address of string
 ;		String:	First byte is ROW, second is COL, the rest is printed.
 ; CursorAt:	Set .A=ROW, .Y=COL	- Positions cursor.
+; PrintMsg:	Set .A=LO, .Y=HI address of string
 ; ClearMsg:	NONE			- Clears Status line with SPACES
 ; ClearRow:	Set .A=ROW, 		- Clears the entire ROW with SPACE.
 ; FillRow:	Set .A=ROW, .Y=CHR	- Clears the entire ROW with CHR.
@@ -541,7 +637,7 @@ CursorAt:	STA CursorRow				; Set ROW
 		JSR SetCursor				; Position Cursor
 		RTS
 
-SetMsg:		PHA					; Save .A and .Y
+PrintMsg:	PHA					; Save .A and .Y
 		TYA					; onto stack
 		PHA
 		JSR ClearMsg				; Clear the Status Line
@@ -563,6 +659,12 @@ ClearRloop:	STA (ScrPtr),Y				; Write character to screen
 		CPY SCNWID				; Is it end of line?
 		BNE ClearRloop				; No, go back for more
 		RTS
+
+
+
+;MyPrint:	STA ZP2
+;		STY ZP2+1
+
 
 ;======================================================================================
 ; SET CURSOR
@@ -588,30 +690,6 @@ SetC80:		LDA SLA80_Lo,Y				; Get LO from Table
 SetCAX:		STA ScrPtr				; Store in ScrPrt LO
 		STX ScrPtr+1				; Store in ScrPrt HI
 SetCDone:	RTS
-
-
-;======================================================================================
-; GET ANY KEY
-;======================================================================================
-; Wait for any key to be pressed 
-
-AnyKey:		JSR GETIN			; Get keystroke to .A
-		BEQ AnyKey			; None, so loop back
-		RTS
-
-;======================================================================================
-; CONFIRM (Y/N)
-;======================================================================================
-; Display confirmation then wait for Y/N (or STOP) key
-; Answer returned in .A
-
-SurePrompt:	LDA #<YesNoPrompt
-		LDY #>YesNoPrompt
-		JSR SetMsg
-SureLoop:	JSR GETIN
-		BEQ SureLoop
-		RTS
-
 
 
 ;**************************************************************************************
@@ -656,8 +734,9 @@ SENDCMDDONE	JSR UNLSN			; un-listen
 
 GetDiskStatus:
 		LDA #DSROW			; Disk Status ROW
-		LDY #0
-		JSR CursorAt
+		LDY #0				; Column 0
+		JSR CursorAt			; Set the cursor
+
 		LDA MYDRIVE			; Current Device#
 		STA FA				; Set device number
 		JSR TALK			; TALK
@@ -665,14 +744,14 @@ GetDiskStatus:
 		STA SA				; Store it
 		JSR SECND			; Send secondary address
 
-GS_NEXTCHAR	jsr ACPTR			; Read byte from IEEE bus
-		cmp #$0D			; Is byte = CR?		
-		beq GS_DONE			; yes, jump out
-		jsr SCROUT			; no, write char to screen
-		jmp GS_NEXTCHAR			; go back for more
+GS_NEXTCHAR	JSR ACPTR			; Read byte from IEEE bus
+		CMP #$0D			; Is byte = CR?		
+		BEQ GS_DONE			; yes, jump out
+		JSR SCROUT			; no, write char to screen
+		JMP GS_NEXTCHAR			; go back for more
 
-GS_DONE		jsr UNTLK			; UNTALK
-		RTS				; jmp READY ; Back to BASIC
+GS_DONE		JSR UNTLK			; UNTALK
+		RTS
 
 ;======================================================================================
 ; LOAD LEFT/RIGHT DIRECTORY
@@ -740,7 +819,7 @@ LoadDirectory:
   
 		LDA #<ReadingDir		; Print "Reading.."
 		LDY #>ReadingDir
-		JSR SetMsg
+		JSR PrintMsg
 
 		LDY #2				; Length=2 "$0" or "$1" DEBUG!!!!!!!!!!!!!
 		STY FNLEN			; Save it
@@ -827,7 +906,7 @@ Entry_done:	LDA DCOUNT			; Get Counter
 StopListing:	JSR CLSEI			; close file with $E0, unlisten
 		LDA #<DirLoaded
 		LDY #>DirLoaded		
-		JSR SetMsg
+		JSR PrintMsg
 		LDA #0				; HI # of entries = 0
 		JSR INTOUT			; write #blocks to screen
 		RTS
@@ -853,48 +932,6 @@ IncZP1:		INC ZP1				; Increment pointer LO
 		BNE IncZP1X
 		INC ZP1+1			; Increment pointer HI
 IncZP1X:	RTS		
-
-
-;======================================================================================
-; LOAD / RUN
-;======================================================================================
-; Load a file. Run it too?
-; FNADR must be set to point to filename
-; FNLEN must be set to filename length
-
-loadrun:	lda #0				; Clear status byte
-		sta STATUS
-		sta VERCK			; LOAD=0, VERIFY=1
-		jsr LOADOP			; LOAD without pointer change
-
-		lda STATUS			; Did it load?
-		and #$10
-		bne loaderr			; No, exit out
-
-;-------------- File Exits,
-
-		lda EAL+1			; end of program MSB
-		sta VARTAB+1			; start of basic variables MSB
-		lda EAL				; end of program LSB
-		sta VARTAB			; start of basic variables LSB
-
-		jsr CRLF
-		jsr RSTXCLR			; reset TXTPTR and perform CLR
-		jsr LINKPRG			; rebuild chaining of BASIC lines
-
-		lda SAVELA
-		cmp #$2f			; if '/' then load only, omit RUN
-		bne startprg			; '^' --> RUN
-		jmp READY			; load only, exit with BASIC warm start
-
-startprg	jsr STXTPT			; reset TXTPTR
-		jmp NEWSTT			; RUN
-
-loaderr:	jmp ILoop
-		
-;		jmp FILENOTFOUND		; FILE NOT FOUND, return to basic
-
-
 
 
 ;**************************************************************************************
@@ -1027,6 +1064,9 @@ DrawUI:		JSR $E015			; Clear Screen
 		LDY #>ProgInfo
 		JSR PrintAt			; Print Program Info
 
+		LDA #HELPROW-1			; Row 23
+		LDY #104				; Horizontal line chr
+		JSR FillRow			; Fill the row with 
 		LDA #<KeyBar				
 		LDY #>KeyBar
 		JSR PrintAt			; Print Key Bar
@@ -1038,7 +1078,7 @@ DrawUI:		JSR $E015			; Clear Screen
 
 ;-------------- User Interface
 
-ProgInfo:	!BYTE MSGROW-1,0				; Message ROW
+ProgInfo:	!BYTE PROGROW,0				; Message ROW
 		!PET  "stevebrowse 2021-04-12",0 		; Title text
 KeyBar:		!BYTE HELPROW,0					; HELP ROW
 		!PET  RVS,"cls"   ,ROFF,"drive "		; Select Drive
@@ -1055,13 +1095,20 @@ FNDir0:		!PET "$0",0					; Directory string
 FNDir1:		!PET "$1",0					; Directory string
 
 YesNoPrompt:	!PET "are you sure (y/n)?",0
-DevPrompt:	!PET "device (8=8,9=9,0=10,1=11,2=12)?",0
+
+DevPrompt:	!PET "device# (",RVS,"8",ROFF," ",RVS,"9",ROFF
+		!PET " 1",RVS,"0",ROFF," 1",RVS,"1",ROFF," 1",RVS,"2",ROFF,")?",0
+
 UnitPrompt:	!PET "unit (0,1)?",0
-ReadingDir:	!PET "reading...",0		
+
 DirLoaded:	!PET 146,"# of entries:",0
+ReadingDir:	!PET "reading",0
 Copying		!PET "copying...",0
 Renaming:	!PET "renaming...",0
 
+LoadPrompt:	!PET "load program (y/n)?",0			; Load prompt
+DLoadPrep:	!PET 147,"dL",0					; <CLS>dL<QUOTE> - Pre-filename
+DLoadPost:	!PET ",d0,u8",0					; d0,u8          - Post-filename
 
 ;======================================================================================
 ; SCREEN LINE ADDRESS TABLE
