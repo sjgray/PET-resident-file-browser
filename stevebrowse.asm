@@ -28,7 +28,8 @@ SCREENPAGES     = 8				; 2K size for 80 col
 DIRWIDTH        = 16				; Width of directory window
 DIRHEIGHT	= 20				; Height of directory window
 DIRROW		= 0				; Row for first directory line
-DIRCOL		= 1				; Column for directory listing
+DIRCOL0		= 1				; Column for LEFT directory
+DIRCOL1		= 24				; Column for LEFT directory
 IDFLAG		= 0				; Flag to add ID string
 MYDRIVE		= 8				; Default Drive Number, ie: 8
 DRIVEUNIT	= 0				; Default Unit Numberm ie: 0 or 1
@@ -64,7 +65,7 @@ DSEL		= $BE				; Index of Selected Entry
 DEND		= $BF				; Index of Last Entry
 DCOUNT		= $C0				; Counter for directory display
 DENTRY		= $C1				; Index of current Entry
-DTMPY		= $C2				; Last free
+DCOL		= $C2				; Left column for directory listing
 
 ;-- $ED-$F7 not used in 80-column machines. Safe to use here for now?
 
@@ -75,24 +76,24 @@ ZP3		= $F2				; Work Pointer - Directory display
 ;-------------- Memory Locations
 
 TAPEBUFFER      = $027A				; Tape buffer
-SCNSAVE1	= TAPEBUFFER+1			; Cursor Pointer LO
-SCNSAVE2	= TAPEBUFFER+2			; Cursor Pointer HI
-SCNSAVE3	= TAPEBUFFER+3			; Cursor Column/offset
-SCNSAVE4	= TAPEBUFFER+4			; Cursor Row
+SCNSAVE1	= TAPEBUFFER+1			; $027B Cursor Pointer LO
+SCNSAVE2	= TAPEBUFFER+2			; $027C Cursor Pointer HI
+SCNSAVE3	= TAPEBUFFER+3			; $027D Cursor Column/offset
+SCNSAVE4	= TAPEBUFFER+4			; $027E Cursor Row
 
 ;-- Details for LEFT Directory
-LDIRMEM		= TAPEBUFFER+5			; LO LEFT Directory Buffer Pointer
-;		= TAPEBUFFER+6			; HI
-LDIRTOP		= TAPEBUFFER+7			; LEFT Index of Top Entry
-LDIRSEL		= TAPEBUFFER+8			; LEFT Index of selected entry
-LDIREND		= TAPEBUFFER+9			; LEFT Index of Last Entry
+LDIRMEM		= TAPEBUFFER+5			; $027F LO LEFT Directory Buffer
+;		= TAPEBUFFER+6			; $0280 HI LEFT Directory Buffer
+LDIRTOP		= TAPEBUFFER+7			; $0281 LEFT Index of Top Entry
+LDIRSEL		= TAPEBUFFER+8			; $0282 LEFT Index of selected entry
+LDIREND		= TAPEBUFFER+9			; $0283 LEFT Index of Last Entry
 
 ;-- Details for RIGHT Directory
-RDIRMEM		= TAPEBUFFER+10			; LO LEFT Directory Buffer Pointer
-;		= TAPEBUFFER+11			; HI
-RDIRTOP		= TAPEBUFFER+12			; LEFT Index of Top Entry
-RDIRSEL		= TAPEBUFFER+13			; LEFT Index of selected entry
-RDIREND		= TAPEBUFFER+14			; LEFT Index of Last Entry
+RDIRMEM		= TAPEBUFFER+10			; $0284 LO RIGHT Directory Buffer
+;		= TAPEBUFFER+11			; $0285 HI RIGHT Directory Buffer
+RDIRTOP		= TAPEBUFFER+12			; $0286 RIGHT Index of Top Entry
+RDIRSEL		= TAPEBUFFER+13			; $0287 RIGHT Index of selected entry
+RDIREND		= TAPEBUFFER+14			; $0288 RIGHT Index of Last Entry
 
 
 ;======================================================================================
@@ -109,8 +110,11 @@ Start:
 		JSR FindScnWidth		; Determine width of screen
 		
 		JSR DrawUI			; Draw the interface
-		JSR LoadLeftDir			; Load the directory
-		JSR ShowLeftDir			; Show the directory
+		JSR LoadLeftDir			; Load the LEFT directory
+		JSR ShowLeftDir			; Show the LEFT directory
+		JSR LoadRightDir		; Load the RIGHT directory
+		JSR ShowRightDir		; Show the RIGHT directory
+
 		JSR GetDiskStatus		; Get Disk Status
 
 		JSR AnyKey			; Wait for a key
@@ -121,7 +125,7 @@ BrowseDone:	RTS
 TestMsg1:	!PET "[start1]",13,0
 TestMsg2:	!PET "[start2]",13,0
 TestMsg3:	!PET "[initdone]",13,0
-TestMsg4:	!PET "[copyscreen]",13,0
+
 
 ;======================================================================================
 ; Init Stuff
@@ -131,17 +135,22 @@ TestMsg4:	!PET "[copyscreen]",13,0
 ; FREETOP pointer is the End of RAM and is the last address we can use.
 ; ** Testing phase - ignore FREETOP, max 255 entries which uses ~6K for directory.
 
+; Buffers with no BASIC program loaded: LEFT  at $0D00, RIGHT at $2500
+
 InitStuff:	LDX #0				; Make our data start on page boundry
 		STX SCNMEM			; LO Screen Save Address
-		STX LDIRMEM			; LO Directory Storage Address
+		STX LDIRMEM			; LO LEFT  Directory Buffer
+		STX RDIRMEM			; LO RIGHT Directory Buffer
 		STX CLMARGIN			; Cursor Left Margin
 		LDX STREND+1			; HI End of Arrays
 		INX				; Start on boundty of next page
-		STX SCNMEM+1			; HI Screen Save address
+		STX SCNMEM+1			; HI Screen Save Buffer
 		TXA
 		CLC
 		ADC #8				; Reserve 8 pages for 80-col screen
-		STA LDIRMEM+1			; HI Directory Start Address
+		STA LDIRMEM+1			; HI LEFT Directory Buffer
+		ADC #24				; Reserve 24 pages (6K) for LEFT Dir
+		STA RDIRMEM+1			; HI RIGHT Directory Buffer
 		
 		LDA #8				; Default Drive=8
 		STA MYDRIVE			; Set it
@@ -149,23 +158,36 @@ InitStuff:	LDX #0				; Make our data start on page boundry
 
 
 ;======================================================================================
-; SETUP FOR LEFT DIRECTORY
+; SETUP FOR LEFT/RIGHT DIRECTORY
 ;======================================================================================
 ; Displays the directory in the proper location
 
 ShowLeftDir:	LDY LDIRMEM			; LO Pointer to LEFT Directory Buffer
-		STY DMEM			; LO Pointer for Dir Memory
-		INY				; Add 2 to skip block bytes
-		INY
-		STY ZP3				; LO Work Pointer
-		LDY LDIRMEM+1			; HI Pointer to LEFT Directory Buffer
-		STY DMEM+1			; HI Pointer for Dir Memory
-		STY ZP3+1			; HI Work Pointer
+		LDA LDIRMEM+1			; HI Pointer to LEFT Directory Buffer
+		JSR SetDirMem			; Set Memory Pointers
+		LDA #DIRCOL0			; LEFT directory column
 		LDY LDIREND			; Index of LEFT last entry
+		JMP ShowTest
+
+ShowRightDir:	LDY RDIRMEM			; LO Pointer to LEFT Directory Buffer
+		LDA RDIRMEM+1			; HI Pointer to LEFT Directory Buffer
+		JSR SetDirMem			; Set Memory Pointers
+		LDA #DIRCOL1			; LEFT directory column
+		LDY RDIREND			; Index of LEFT last entry
+
+ShowTest:	STA DCOL			; Directory Column
 		STY DEND			; Index of last entry
 		CPY #0				; Is DEND zero?
 		BNE ShowDirectory		; No, good to go
 		RTS				; Yes, nothing to show!
+
+SetDirMem:	STY DMEM			; LO Pointer for Dir Memory
+		INY				; Add 2 to skip block bytes
+		INY
+		STY ZP3				; LO Work Pointer
+		STA DMEM+1			; HI Pointer for Dir Memory
+		STA ZP3+1			; HI Work Pointer
+		RTS
 
 ;======================================================================================
 ; SHOW DIRECTORY
@@ -181,7 +203,7 @@ ShowDirectory:	LDY DTOP			; Top Entry
 SDLoop:		LDA #DIRROW			; Cursor Position for Top Left
 		CLC
 		ADC DCOUNT			; Add Entry Count
-		LDY #DIRCOL
+		LDY DCOL			; Column for selected directory
 		JSR CursorAt			; Move cursor to top of directory
 
 ;-------------- Print the entry
@@ -208,7 +230,7 @@ SDNext:		INC DCOUNT			; Next Entry#
 		CMP #DIRHEIGHT			; Is it at end of box?
 		BEQ SDexit			; Yes, exit
 		CMP DEND			; Is it at the end of the directory?
-		BMI SDLoop			; No, Go back for another entry
+		BNE SDLoop			; No, Go back for another entry
 SDexit:		RTS
 
 
@@ -378,16 +400,40 @@ LoadLeftDir:
 		LDA LDIRMEM+1			; HI Pointer to Directory Storage Address
 		STA ZP1+1			; HI Pointer
 
+		LDA #<FNDir0			; LO Pointer to Filename ("$0")
+		STA FNADR			; LO Filename Address pointer
+		LDA #>FNDir0			; HI
+		STA FNADR+1			; HI 
+
 		JSR LoadDirectory		; Read directory to memory, count entries
 
 		LDA DTOP			; Now we copy results back to LEFT DIR
 		STA LDIRTOP			; Start at Top of List
 		LDA DSEL
 		STA LDIRSEL			; Selected at top
-		LDA DEND
-		STA LDIREND			; End of directory
 		LDA DCOUNT
-		STA LDIREND			; Number of entries in directory			; TODO: save the end address here
+		STA LDIREND			; End of directory
+		RTS
+
+LoadRightDir:
+		LDA RDIRMEM			; LO Pointer to Directory Storage Address
+		STA ZP1				; LO
+		LDA RDIRMEM+1			; HI Pointer to Directory Storage Address
+		STA ZP1+1			; HI Pointer
+
+		LDA #<FNDir1			; LO Pointer to Filename ("$1")
+		STA FNADR			; LO Filename Address pointer
+		LDA #>FNDir1			; HI
+		STA FNADR+1			; HI 
+
+		JSR LoadDirectory		; Read directory to memory, count entries
+
+		LDA DTOP			; Now we copy results back to LEFT DIR
+		STA RDIRTOP			; Start at Top of List
+		LDA DSEL
+		STA RDIRSEL			; Selected at top
+		LDA DCOUNT
+		STA RDIREND			; Number of entries in directory			; TODO: save the end address here
 		RTS
 
 ;======================================================================================
@@ -408,11 +454,7 @@ LoadDirectory:
 		LDY #>ReadingDir
 		JSR SetStatus
 
-		LDA #<FNDirectory		; LO Pointer to Filename ("$0")
-		STA FNADR			; LO Filename Address pointer
-		LDA #>FNDirectory		; HI
-		STA FNADR+1			; HI 
-		LDY #2				; Length=2 "$0"
+		LDY #2				; Length=2 "$0" or "$1"
 		STY FNLEN			; Save it
 
 		LDA #0				; Clear the status byte
@@ -481,7 +523,7 @@ SkipToEnd:	JSR ACPTR			; Read
 BlocksFree:	JSR GetStor			; Get and store text
 		CMP #0				; Is it <NULL>
 		BNE BlocksFree			; No, get more
-		jmp StopListing		
+		JMP StopListing		
 
 ;-------------- Line is complete
 
@@ -497,10 +539,10 @@ StopListing:	JSR CLSEI			; close file with $E0, unlisten
 		LDA #<DirLoaded
 		LDY #>DirLoaded		
 		JSR SetStatus
-		ldx DCOUNT			; # of entries
-		lda #0
-		jsr INTOUT			; write #blocks to screen
-		rts
+		LDX DCOUNT			; LO # of entries = DCOUNT
+		LDA #0				; HI # of entries = 0
+		JSR INTOUT			; write #blocks to screen
+		RTS
 
 
 ;-------------- Directory Read / Discard / Store, and Pointer Update ZP1
@@ -611,10 +653,6 @@ RestoreScreen:	LDA SCNMEM			; LO Source address
 ; ZP1 and ZP2 are set, so set .X and fall into copy routine below
 
 CopyScreen:
-		LDA #<TestMsg4
-		LDY #>TestMsg4
-		JSR STROUTZ
-
 		LDX #SCREENPAGES		; How many pages to copy? 8=2K
 
 ;-------------- BLOCK COPY
@@ -687,10 +725,6 @@ DUIBottom:	LDA #<DirBox3
 DUIBar:		LDA #<KeyBar				
 		LDY #>KeyBar
 		JSR PrintAt			; Print key bar line
-
-DUITitle:	LDA #<Help
-		LDY #>Help
-		JSR PrintAt
 		RTS
 
 ;======================================================================================
@@ -710,19 +744,20 @@ DirBox3:	!BYTE $AD					; Bottom Left Corner
 		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
 		!BYTE $BD,13,0					; Bottom Right Corner, CR
 
-KeyBar:		!BYTE 5,30 ;ROW/COL
-		!PET "up/dn=sel,return=run/cd, r=root",19,13,0	; Keys <home> - NO CR
-
-Help:		!BYTE 0,30
-		!PET 18,"stevebrowse 2021-04-08",13,0		; Help 
+KeyBar:		!BYTE 21,0					; ROW=22,COL=0
+		!PET "stevebrowse 2021-04-08  " 
+		!PET 18,"up/dn",146,"=sel,"
+		!PET 18,"return",146,"=run/cd, "
+		!PET 18,"r",146,"=root",19,13,0			; Keys <home> - NO CR
 
 ;-------------- 
 HomeHome:	!BYTE 19,19,147,17,0				; <HOME><HOME><CLS><DOWN>
-FNDirectory:	!PET "$0",0					; Directory string
+FNDir0:		!PET "$0",0					; Directory string
+FNDir1:		!PET "$1",0					; Directory string
 
 AreUSure:	!PET "are you sure (y/n)?",0
 ReadingDir:	!PET "reading directory...",0		
-DirLoaded:	!PET "directory entries:",0
+DirLoaded:	!PET 146,"directory entries:",0
 Copying		!PET "copying...",0
 Renaming:	!PET "renaming...",0
 
