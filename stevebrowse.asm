@@ -1,9 +1,7 @@
-; PET/CBM EDIT ROM - File Browser and Utility  (C)2021 Steve J. Gray
-; ===========================================  
-; - Started March 25, 2021
-; - Updated: 2021-04-07
+; PET/CBM EDIT ROM - File Browser and Utility  (C)2021 Steve J. Gray, March 25/2021
+; ===========================================  Updated: 2021-04-11
 ;
-; A File Browser Utility that can be included in Editor ROM or Option ROM.
+; A File Browser Utility for Option ROM or (hopefully) Editor ROM.
 ;
 ;-------------- Includes
 ; includes from editrom project. Need to fool it, so define a few things first.
@@ -21,6 +19,7 @@ BACKACTION	= 0
 !SOURCE "memkernal.asm"				; KERNAL calls
 !SOURCE "memlow.asm"				; Low Memory locations
 !SOURCE "memzeropage.asm"			; Zero Page locations
+
 PRINT		= $FFD2				; Print a character routine
 
 ;-------------- Constants
@@ -58,26 +57,23 @@ ROFF		= 146				; <OFF>
 ;STROUT		= $bb24				; X=len, STRADR=ptr
 
 
-ACTIVEDIR	= $B1				; LO Screen Save Buffer Pointer
-;		= $B2				; HI
-SCNWID		= $B5				; Current Screen Width 
-CLMARGIN	= $B6				; Cursor LEFT Margin
-SELMEM		= $B7				; Selected Item Memory Pointer
-;		= $B8				; FREE
+ACTIVEDIR	= $B1				; Active Directory# 0 or 1
+SCNWID		= $B2				; Current Screen Width 
+;CLMARGIN	= $B3				; Cursor LEFT Margin
 
 ;-- Details for Directory being Browsed
 
-DMEM		= $B9				; LO Directory Buffer Pointer
-;		= $BA				; HI
-DTOPMEM		= $BB				; LO Pointer to Top Entry Address
-;		= $BC				; HI
-DTOP		= $BD				; Index of Top entry
-DSEL		= $BE				; Index of Selected Entry
-DBOT		= $BF				; Index of Bottom Entry
-DEND		= $C0				; Index of Last Entry
-DCOUNT		= $C1				; Counter for directory display
-DENTRY		= $C2				; Index of current Entry
-DCOL		= $C3				; Left column for directory listing
+DMEMHI		= $B4				; HI Directory Buffer Pointer
+DTOP		= $B5				; Index of Top entry
+DSEL		= $B6				; Index of Selected Entry
+DBOT		= $B7				; Index of Bottom Entry
+DEND		= $B8				; Index of Last Entry
+DCOL		= $B9				; Left column for directory listing
+DSELMEM		= $BA				; LO Selected Item Memory Pointer
+;		= $BB				; HI Selected Item Memory Pointer
+
+DCOUNT		= $BC				; Counter for directory display
+DENTRY		= $BD				; Index of current Entry
 
 ;-- $ED-$F7 not used in 80-column machines. Safe to use here for now?
 
@@ -93,35 +89,39 @@ ZP3		= $F2				; Work Pointer - Directory display
 
 TAPEBUFFER      = $027A				; 634   Tape buffer
 
-SCNSAVE1	= TAPEBUFFER			; $027B Cursor Pointer LO
-SCNSAVE2	= TAPEBUFFER+1			; $027C Cursor Pointer HI
-SCNSAVE3	= TAPEBUFFER+2			; $027D Cursor Column/offset
-SCNSAVE4	= TAPEBUFFER+3			; $027E Cursor Row
-SCNMEM		= TAPEBUFFER+4			; $027F LO Pointer to Screen Buffer
-;		= TAPEBUFFER+5			; $0280 HI Pointer to Screen Buffer
-CMDMEM		= TAPEBUFFER+6			; $0281 LO Command String Buffer Pointer
-;		= TAPEBUFFER+7			; $0282 HI
+SCREENMEM	= TAPEBUFFER
+LEFTMEM		= TAPEBUFFER+10			; Start of LEFT  Memory Structure
+RIGHTMEM	= TAPEBUFFER+20			; Start of RIGHT Memory Structure
+
+SCNSAVE1	= SCREENMEM			; Cursor Pointer LO
+SCNSAVE2	= SCREENMEM+1			; Cursor Pointer HI
+SCNSAVE3	= SCREENMEM+2			; Cursor Column/offset
+SCNSAVE4	= SCREENMEM+3			; Cursor Row
+SCNMEMHI	= SCREENMEM+4			; LO Pointer to Screen Buffer
+;
+CMDMEM		= SCREENMEM+6			; LO Command String Buffer Pointer
+;		= SCREENMEM+7			; HI Command String Buffer Pointer
 
 ;-- Details for LEFT/RIGHT Directory
 ; These locations must match the ones in Zero Page (starting from DMEM)
 
-LDIRMEM		= TAPEBUFFER+10			; $0284 LO LEFT Directory Buffer
-;		= TAPEBUFFER+11			; $0285 HI LEFT Directory Buffer
-LDIRTOPMEM	= TAPEBUFFER+12			; $0286 LO LEFT Top Memory Pointer
-;		= TAPEBUFFER+13			; $0287 HI LEFT Top Memory Pointer
-LDIRTOP		= TAPEBUFFER+14			; $0288 LEFT Index of Top Entry
-LDIRSEL		= TAPEBUFFER+15			; $0289 LEFT Index of Selected entry
-LDIRBOT		= TAPEBUFFER+16			; $028A LEFT Index of Bottomd entry
-LDIREND		= TAPEBUFFER+17			; $028B LEFT Index of Last Entry
+LDIRACTIVE	= LEFTMEM			; LEFT Active Status
+LDIRMEMHI	= LEFTMEM+1			; LEFT HI Directory Buffer Page
+LDIRTOP		= LEFTMEM+2			; LEFT Index of Top Entry
+LDIRSEL		= LEFTMEM+3			; LEFT Index of Selected entry
+LDIRBOT		= LEFTMEM+4			; LEFT Index of Bottom entry
+LDIREND		= LEFTMEM+5			; LEFT Index of Last Entry
+LSELMEM		= LEFTMEM+6			; LEFT LO Selected Item Memory 
+;		= LEFTMEM+7			; LEFT HI Selected Item Memory 
 
-RDIRMEM		= TAPEBUFFER+20			; $028E LO RIGHT Directory Buffer
-;		= TAPEBUFFER+21			; $028F HI RIGHT Directory Buffer
-RDIRTOPMEM	= TAPEBUFFER+22			; $0286 LO RIGHT Top Memory Pointer
-;		= TAPEBUFFER+23			; $0287 HI RIGHT Top Memory Pointer
-RDIRTOP		= TAPEBUFFER+24			; $0290 RIGHT Index of Top Entry
-RDIRSEL		= TAPEBUFFER+25			; $0291 RIGHT Index of Selected entry
-RDIRBOT		= TAPEBUFFER+26			; $0292 RIGHT Index of Bottom entry
-RDIREND		= TAPEBUFFER+27			; $0293 RIGHT Index of Last Entry
+RDIRACTIVE	= RIGHTMEM			; RIGHT Active Status
+RDIRMEMHI	= RIGHTMEM+1			; RIGHT HI Directory Buffer Page
+RDIRTOP		= RIGHTMEM+2			; RIGHT Index of Top Entry
+RDIRSEL		= RIGHTMEM+3			; RIGHT Index of Selected entry
+RDIRBOT		= RIGHTMEM+4			; RIGHT Index of Bottom entry
+RDIREND		= RIGHTMEM+5			; RIGHT Index of Last Entry
+RSELMEM		= RIGHTMEM+6			; RIGHT LO Selected Item Memory 
+;		= RIGHTMEM+7			; RIGHT HI Selected Item Memory 
 
 
 ;======================================================================================
@@ -147,12 +147,11 @@ Start:
 
 		JSR GetDiskStatus		; Get Disk Status
 
-		JSR Interact			; The Main Code
+		JSR Interact			; The Main Code. Loops until Exit.
 
-;		JSR AnyKey			; Wait for a key
 		JSR RestoreScreen		; Restore the screen
 		JSR RestoreCursorPos		; Restore cursor position
-BrowseDone:	RTS
+BrowseDone:	RTS				; Exit Program
 
 ;TestMsg1:	!PET "[test1]",13,0
 ;TestMsg2:	!PET "[test2]",13,0
@@ -243,12 +242,12 @@ IsSpace:	LDA DSEL			; Is SELECTED zero? (header)
 
 		LDY #18				; Index for MARK character
 		LDX #32				; Assume we need to de-Select
-		LDA (SELMEM),Y			; Get the bye
+		LDA (DSELMEM),Y			; Get the bye
 		CMP #95				; Is it <BACKARROW>?
 		BEQ IsSpaceX			; Yes, deselect it
 		LDX #95				; No, make it <BACKARROW>
 IsSpaceX:	TXA
-		STA (SELMEM),Y			; Write <BACKARROW> to entry
+		STA (DSELMEM),Y			; Write <BACKARROW> to entry
 		JMP IRefresh
 
 ;-------------- Perform Page DOWN
@@ -274,7 +273,7 @@ IPUfull		SBC #DIRHEIGHT			; Subtract height of display box
 		STA DTOP			; Set DTOP
 		JMP IRefresh			; Re-draw list
 		
-;-------------- We are lost
+;-------------- We are lost... for now
 
 		JMP IRefresh
 
@@ -287,9 +286,9 @@ IPUfull		SBC #DIRHEIGHT			; Subtract height of display box
 ; DTOP is limited to one byte, so 256 maximum entries.
 
 SetDZ:		LDY DTOP			; Directory TOP. Counter for add loop
-		LDA DMEM+1			; HI DMEM 
+		LDA DMEMHI			; HI Page for Directory Buffer
 		STA ZP3+1			; HI Work Pointer
-		LDA #2				; LO DMEM = $00 + 2
+		LDA #2				; LO = $00 + 2
 		STA ZP3				; LO Work Pointer
 SetDZloop:	CPY #0				; Are we at top?
 		BEQ SetDZX			; Yes, done
@@ -302,51 +301,20 @@ SDZskip:	DEY				;
 		BNE SetDZloop			; Loop back
 SetDZX:		RTS
 		
-;======================================================================================
-; Init Stuff
-;======================================================================================
-; Here we look at the BASIC pointers to figure out where we can store our data.
-; STREND  pointer is the End of Array pointer which is the first address that is free
-; FREETOP pointer is the End of RAM and is the last address we can use.
-; ** Testing phase - ignore FREETOP, max 255 entries which uses ~6K for directory.
-
-; Buffers with no BASIC program loaded: LEFT  at $0D00, RIGHT at $2500
-
-InitStuff:	LDX #0				; Make our data start on page boundry
-		STX SCNMEM			; LO Screen Save Address
-		STX LDIRMEM			; LO LEFT  Directory Buffer
-		STX RDIRMEM			; LO RIGHT Directory Buffer
-		STX CLMARGIN			; Cursor Left Margin
-		LDX STREND+1			; HI End of Arrays
-		INX				; Start on boundty of next page
-		STX SCNMEM+1			; HI Screen Save Buffer
-		TXA
-		CLC
-		ADC #8				; Reserve 8 pages for 80-col screen
-		STA LDIRMEM+1			; HI LEFT Directory Buffer
-		ADC #24				; Reserve 24 pages (6K) for LEFT Dir
-		STA RDIRMEM+1			; HI RIGHT Directory Buffer
-		
-		LDA #8				; Default Drive=8
-		STA MYDRIVE			; Set it
-		RTS
-
 
 ;======================================================================================
 ; SETUP FOR LEFT/RIGHT DIRECTORY
 ;======================================================================================
 ; Displays the directory in the proper location
 
-ShowLeftDir:	LDY LDIRMEM			; LO Pointer to LEFT Directory Buffer
-		LDA LDIRMEM+1			; HI Pointer to LEFT Directory Buffer
-;		JSR SetDirMem			; Set Memory Pointers
+ShowLeftDir:	LDA LDIRMEMHI			; HI Pointer to LEFT Directory Buffer
+		JSR SetDirMem			; Set Memory Pointers
 		LDA #DIRCOL0			; LEFT directory column
 		LDY LDIREND			; Index of LEFT last entry
 		JMP ShowTest
 
-ShowRightDir:	LDY RDIRMEM			; LO Pointer to LEFT Directory Buffer
-		LDA RDIRMEM+1			; HI Pointer to LEFT Directory Buffer
-;		JSR SetDirMem			; Set Memory Pointers
+ShowRightDir:	LDA RDIRMEMHI			; HI Pointer to LEFT Directory Buffer
+		JSR SetDirMem			; Set Memory Pointers
 		LDA #DIRCOL1			; LEFT directory column
 		LDY RDIREND			; Index of LEFT last entry
 
@@ -356,56 +324,42 @@ ShowTest:	STA DCOL			; Directory Column
 		BNE ShowDirectory		; No, good to go
 		RTS				; Yes, nothing to show!
 
-;SetDirMem:	STY DMEM			; LO Pointer for Dir Memory
-;		INY				; Add 2 to skip block bytes
-;		INY
-;		STY DTOPMEM			; LO Top Index Memory Pointer
-;		STY ZP3				; LO Work Pointer
-;
-;		STA DMEM+1			; HI Pointer for Dir Memory
-;		STA DTOPMEM+1			; HI Top Index Memory Pointer
-;		STA ZP3+1			; HI Work Pointer
-;		RTS
+SetDirMem:	STA DMEMHI			; HI Top Index Memory Pointer
+		STA ZP3+1			; HI Work Pointer
+		LDA #2				; LO starts at 2
+		STA ZP3				; LO Work Pointer
+		RTS
 
-DIRDEBUG:	LDY DTOPMEM
+;======================================================================================
+; DEBUG TO SCREEN
+;======================================================================================
+
+DIRDEBUG:	LDY DTOP
 		STY DEBUGRAM+4
-		LDY DTOPMEM+1
-		STY DEBUGRAM+5
-
-		LDY DTOP
-		STY DEBUGRAM+7
 		LDY DSEL
-		STY DEBUGRAM+8
+		STY DEBUGRAM+5
 		LDY DBOT
-		STY DEBUGRAM+9
+		STY DEBUGRAM+6
 		LDY DEND
-		STY DEBUGRAM+10
+		STY DEBUGRAM+7
 		RTS
 
 ;======================================================================================
 ; SHOW DIRECTORY
 ;======================================================================================
-; ZP3 pointer used to walk through directory memory
-; Copy ZP3 to DTOPMEM so we can Scroll relative to this.
-; Update DTOP. Increment DENTRY as we go. Count displayed lines in DCOUNT.
+; ZP3 pointer used to walk through directory memory.
+; Count displayed lines in DCOUNT.
 ; When bottom is reached save to DBOT.
-; DSEL is the currently selected entry - it must be marked (somehow!!!!!)
+; DSEL is the currently selected entry.
 
-ShowDirectory:
-		JSR SetDZ			; Set ZP3 pointer based on DTOP
+ShowDirectory:	JSR SetDZ			; Set ZP3 pointer based on DTOP
 		JSR DIRDEBUG
-
-;		LDY DTOPMEM			; LO DTOP Memory Address
-;		STY ZP3				; LO Work Pointer
-;		LDY DTOPMEM+1			; HI DTOP Memory Address
-;		STY ZP3+1			; HI Work Pointer
-
 		LDY DTOP			; Top Entry
 		STY DENTRY			; Make it Current Entry
-
+		STY DBOT			; BOTTOM Index
 		LDY #0				; Count=1 (first entry displayed)
 		STY DCOUNT			; Entry Counter
-		STY DEND			; END Index
+		;STY DEND			; END Index
 
 ;-------------- Position Cursor
 
@@ -418,17 +372,17 @@ SDLoop:		LDA #DIRROW			; Cursor Position for Top Left
 		LDY #0				; Index for print loop
 		STY ReverseFlag			; also, set <RVS> off
 
-SDSelection:
-		LDA #32				; Assume <SPACE> character
-		LDY DCOUNT			; What is the entry#?
+SDSelection:	LDA #32				; Assume <SPACE> character
+		LDY DENTRY			; What is the entry#?
 		CPY DSEL			; Is it SELECTED?
 		BNE SDpoint			; No, skip ahead
 
 ;-------------- Selected Item - Save Pointer
+
 		LDA ZP3				; Save pointer to SELECTED
-		STA SELMEM			; LO SELECTED memory pointer
+		STA DSELMEM			; LO SELECTED memory pointer
 		LDA ZP3+1			; HI Work Pointer
-		STA SELMEM+1			; HI SELECTED memory pointer
+		STA DSELMEM+1			; HI SELECTED memory pointer
 
 		LDA #62				; Yes, use ">" character
 SDpoint:	JSR $FFD2			; Print It!
@@ -462,14 +416,16 @@ SDpos:		LDA ZP3				; LO Work Pointer
 		BCC SDnext			; Did it cross page? No skip ahead
 		INC ZP3+1			; Yes, inc page.
 
-SDnext:		INC DCOUNT			; Next Entry#
+SDnext:
+		INC DENTRY			; Next Entry
+		INC DBOT			; Update BOTTOM
+		INC DCOUNT			; Increment Count
 		LDA DCOUNT			; Get it again		
-		STA DBOT			; Set as BOTTOM (temporarily)		
 		CMP #DIRHEIGHT			; Is it at end of box?
 		BEQ SDexit			; Yes, exit		
 		CMP DEND			; Is it at the end of the directory?
 		BNE SDLoop			; No, Go back for another entry
-SDexit:		DEC DBOT
+SDexit:		DEC DBOT			; adjust
 		RTS
 
 
@@ -634,9 +590,7 @@ GS_DONE		jsr UNTLK			; UNTALK
 ; Initialize pointers for TOP,SEL,END,COUNT
 
 LoadLeftDir:
-		LDA LDIRMEM			; LO Pointer to Directory Storage Address
-		STA ZP1				; LO
-		LDA LDIRMEM+1			; HI Pointer to Directory Storage Address
+		LDA LDIRMEMHI			; HI Pointer to Directory Storage Address
 		STA ZP1+1			; HI Pointer
 
 		LDA #<FNDir0			; LO Pointer to Filename ("$0")
@@ -646,6 +600,7 @@ LoadLeftDir:
 
 		JSR LoadDirectory		; Read directory to memory, count entries
 
+;---- replace these with copy loop!
 		LDA DTOP			; Now we copy results back to LEFT DIR
 		STA LDIRTOP			; Start at Top of List
 		LDA DSEL
@@ -655,10 +610,8 @@ LoadLeftDir:
 		RTS
 
 LoadRightDir:
-		LDA RDIRMEM			; LO Pointer to Directory Storage Address
-		STA ZP1				; LO
-		LDA RDIRMEM+1			; HI Pointer to Directory Storage Address
-		STA ZP1+1			; HI Pointer
+		LDA RDIRMEMHI			; HI Pointer to Directory Storage Address
+		STA ZP1+1			; HI
 
 		LDA #<FNDir1			; LO Pointer to Filename ("$1")
 		STA FNADR			; LO Filename Address pointer
@@ -684,8 +637,10 @@ LoadRightDir:
 ;-------------- Prep
 LoadDirectory:
 		LDA #0				; Clear pointers
-		STA DTOP			; Index of Top entry		
-		STA DEND			; Index of Last Entry
+		STA ZP1				; LO Work Pointer
+		STA DTOP			; Index of TOP entry
+		STA DBOT			; Index of BOTTOMentry		
+		STA DEND			; Index of END Entry
 		STA DCOUNT			; Counter for directory display
 		LDA #1				; Make entry after header SELECTED
 		STA DSEL			; Index of Selected Entry
@@ -771,6 +726,7 @@ Entry_done:	LDA DCOUNT			; Get Counter
 		CMP #255			; Is it 255?
 		BEQ StopListing			; Yes, Maximum entries, so exit
 		INC DCOUNT			; Counter=Counter+1
+		INC DEND			; End=End+1
 		JMP LoadEntry			; No, Jump back for more lines
 
 ;-------------- Listing is complete
@@ -779,8 +735,6 @@ StopListing:	JSR CLSEI			; close file with $E0, unlisten
 		LDA #<DirLoaded
 		LDY #>DirLoaded		
 		JSR SetMsg
-		LDX DCOUNT			; LO # of entries = DCOUNT
-		STX DEND			; save as END
 		LDA #0				; HI # of entries = 0
 		JSR INTOUT			; write #blocks to screen
 		RTS
@@ -848,6 +802,36 @@ loaderr		jmp FILENOTFOUND		; FILE NOT FOUND, return to basic
 ; Routines that are working
 ;**************************************************************************************
 ;======================================================================================
+; Init Stuff
+;======================================================================================
+; Here we look at the BASIC pointers to figure out where we can store our data.
+; STREND  pointer is the End of Array pointer which is the first address that is free
+; FREETOP pointer is the End of RAM and is the last address we can use.
+; All Buffers start on PAGE boundries to reduce code size.
+;
+; ** Testing phase - ignore FREETOP, max 255 entries which uses ~6K for directory.
+; ** Buffers with no BASIC program loaded: LEFT  at $0D00, RIGHT at $2500
+; ** Test on VICE with 8032 Model.
+
+InitStuff:	LDX #0				; Make our data start on page boundry
+		STX ACTIVEDIR			; Active Directory Listing (0/1)
+;		STX CLMARGIN			; Cursor Left Margin
+
+		LDX STREND+1			; HI End of Arrays
+		INX				; Start on boundty of next page
+		STX SCNMEMHI			; HI Screen Save Buffer
+		TXA
+		CLC
+		ADC #8				; Reserve 8 pages for 80-col screen
+		STA LDIRMEMHI			; HI LEFT Directory Buffer
+		ADC #24				; Reserve 24 pages (6K) for LEFT Dir
+		STA RDIRMEMHI			; HI RIGHT Directory Buffer
+		
+		LDA #8				; Default Drive=8
+		STA MYDRIVE			; Set it
+		RTS
+
+;======================================================================================
 ; FIND SCREEN WIDTH
 ;======================================================================================
 ; This routine prints "<HOME><HOME><CLS><DOWN>" using the standard PET print routines.
@@ -869,34 +853,31 @@ FindScnWidth:
 ;======================================================================================
 ; Save/Restore the screen to/from RAM pointed at by ZPSCREEN
 
-SaveScreen:	LDA #<SCREEN_RAM		; LO Screen address
-		STA ZP1				; LO Source pointer
-		LDA #>SCREEN_RAM		; HI Screen address
-		STA ZP1+1			; HI Source pointer
-		LDA SCNMEM			; LO Destination address
-		STA ZP2				; LO Destination pointer
-		LDA SCNMEM+1			; HI Destination address
-		STA ZP2+1			; HI Destination pointer
-		JMP CopyScreen
+SaveScreen:	LDA #>SCREEN_RAM		; HI Screen address
+		LDY SCNMEMHI			; HI Screen Save Buffer
+		BNE CopyScreen			; Setup for copy, then do it
 
-RestoreScreen:	LDA SCNMEM			; LO Source address
-		STA ZP1				; LO Source pointer
-		LDA SCNMEM+1			; HI Source address
-		STA ZP1+1			; HI Source pointer
-		LDA #<SCREEN_RAM		; LO Destination address
-		STA ZP2				; LO Destination pointer
-		LDA #>SCREEN_RAM		; HI Destination address
-		STA ZP2+1			; HI Destination pointer
+RestoreScreen:	LDY #>SCREEN_RAM		; HI Screen address
+		LDA SCNMEMHI			; HI Screen Save Buffer
+		;JMP CopyScreen			; falls into the routine
 
 ;======================================================================================
 ; COPY SCREEN
 ;======================================================================================
-; ZP1 and ZP2 are set, so set .X and fall into copy routine below
+; ZP1 Pointer HI byte in .A
+; ZP2 Pointer HI byte in .Y - Pointer LO bytes are assumed zero.
 
-CopyScreen:
+CopyScreen:	STA ZP1+1			; HI Source Pointer
+		STY ZP2+1			; HI Destination Pointer
+		LDA #0				; Zero LO pointers
+		STA ZP1				; LO Source Pointer
+		STA ZP2				; LO Destination Pointer
+
 		LDX #SCREENPAGES		; How many pages to copy? 8=2K
 
-;-------------- BLOCK COPY
+;======================================================================================
+; MEMORY BLOCK COPY
+;======================================================================================
 ; Copies .X pages from source ZP1 to destination ZP2
 
 CopyMem:	LDY #0				; Start at offset 0
@@ -964,7 +945,7 @@ KeyBar:		!BYTE HELPROW,0					; HELP ROW
 		!PET  RVS,"crsr",  ROFF,"sel "			; Cursor
 		!PET  RVS,"home",  ROFF,"top "			; Home
 		!PET  RVS,"<>",    ROFF,"page "			; Page Up/Down
-		!PET  RVS,"space",  ROFF,"mark "		; Space
+		!PET  RVS,"space", ROFF,"mark "			; Space
 		!PET  RVS,"return",ROFF,"run/cd "		; Return		
 		!BYTE RVS,94,      ROFF				; UpArrow
 		!PET  "root",0					; 
