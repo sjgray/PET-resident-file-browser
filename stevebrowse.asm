@@ -43,10 +43,10 @@ DRECLEN		= 23			; Record length for ram directory
 
 DEBUGRAM	= SCREEN_RAM+24*80+70	; Address  of Debug       ROW
 
-PROGROW		= 0			; Location of Progress    ROW
-DSROW		= 21			; Location of DiskST/File ROW
-MSGROW		= 22			; Location of Info Status ROW
-KEYROW		= 24			; Location of HELP keys   ROW
+PROGROW		= 0			; Location of Program Info ROW
+DSROW		= 21			; Location of DiskST/File  ROW
+MSGROW		= 22			; Location of Info Status  ROW
+KEYROW		= 24			; Location of HELP keys    ROW
 
 RVS		= 18			; <RVS>
 ROFF		= 146			; <OFF>
@@ -110,12 +110,16 @@ SCREENMEM	= TAPEBUFFER
 LEFTMEM		= TAPEBUFFER+10		; Start of LEFT  Memory Structure
 RIGHTMEM	= TAPEBUFFER+20		; Start of RIGHT Memory Structure
 
+;-------------- Screen Save
+
 SCNSAVE1	= SCREENMEM		; Cursor Pointer LO
 SCNSAVE2	= SCREENMEM+1		; Cursor Pointer HI
 SCNSAVE3	= SCREENMEM+2		; Cursor Column/offset
 SCNSAVE4	= SCREENMEM+3		; Cursor Row
 SCNMEMHI	= SCREENMEM+4		; LO Pointer to Screen Buffer
-;
+
+;-------------- Command Buffer
+
 CMDMEM		= SCREENMEM+6		; LO Command String Buffer Pointer
 ;		= SCREENMEM+7		; HI Command String Buffer Pointer
 
@@ -172,12 +176,12 @@ Start:
 		JSR SaveCursorPos		; Save cursor position
 		JSR SaveScreen			; Save the screen to memory
 }
-		JSR FindScnWidth		; Determine width of screen		
+		JSR FindScnWidth		; Determine width of screen
+		
 		JSR DrawUI			; Draw the interface
-		JSR PrepDir			; Load the ACTIVET directory		
-;		JSR LoadRightDir		; Load the RIGHT directory
-		JSR ShowRightDir		; Show the RIGHT directory
-;		JSR ShowLeftDir			; Show the LEFT directory
+		JSR PrepDir			; Load the ACTIVE directory		
+		JSR ShowActiveDir		; Show the RIGHT directory
+
 		JSR ILoopStat			; Interactive Loop with Stat update - Loops until Exit
 BrowseDone:	RTS				; Exit Program
 
@@ -366,7 +370,7 @@ IsCLS:		JSR AskDevice			; Ask and input Device#. Returns 8-15 in .A
 		STA DDEV			; Store Device#
 		JSR AskUnit			; Ask and input Unit#. Returns 0 or 1
 		STA DUNIT			; Store Unit#
-		;do something here
+		JSR PrepCommon			; Get the new directory
 CLSabort:	JMP ILoopStat			; Return and clear status line
 
 
@@ -465,18 +469,20 @@ SetDZX:		RTS
 
 AskDevice:	LDY #3					; Point to Prompt
 		JSR ClearKeyNM				; Print the message
-AskDloop	JSR AnyKey				; Get ANY Key		
+AskDloop	JSR AnyKey				; Get ANY Key
+		STA SCREEN_RAM+70			; DEBUG!!!!!!!!!!!!!!!!!!!		
 		CMP #3					; Is it Stop
 		BEQ AskAbort				; Yes, abort
 		CMP #48					; Is it "0"?
 		BMI AskDloop				; less, not valid
-		CMP #57					; "9"?
+		CMP #58					; "9"?
 		BPL AskDloop				; greater, not valid
 		CLC
-		CMP #56					; Is it "7"?
+		CMP #55					; Is it "7"?
 		BPL NoAdj				; more, skip ahead
-		ADC #10					; less, Add 10 (0 to 7 -> 10 to 17)
+		ADC #11					; less, Add 10 (0 to 7 -> 10 to 17)
 NoAdj:		SBC #48					; Subtract 48 - Device# in .A
+		STA SCREEN_RAM+71			; DEBUG!!!!!!!!!!!!!!!!!!!
 		RTS 
 
 ;======================================================================================
@@ -484,17 +490,20 @@ NoAdj:		SBC #48					; Subtract 48 - Device# in .A
 ;======================================================================================
 ; Prompt for Drive Unit Number. Accepts 0-1 or STOP=Abort
 
-AskUnit:	LDY #4					; Point to Prompt
+AskUnit:	LDY #4					; "Unit (0/1)?" Prompt
 		JSR ClearKeyNM				; Print the message
-AskUloop:	JSR AnyKey				; Get ANY Key		
-		CMP #3					; Is it Stop
+AskUloop:	JSR AnyKey				; Get ANY Key
+		STA SCREEN_RAM+73
+		CMP #3					; Is it Stop?
 		BEQ AskAbort				; Yes, abort
 		CMP #48					; Is it "0"?
-		BMI AskUloop				; less, not valid
+		BEQ AskUok				; less, not valid
 		CMP #49					; "1"?
-		BPL AskUloop				; greater, not valid
-		CLC
-		SBC #48					; Subtract 48 - Device# in .A
+		BNE AskUloop				; greater, not valid
+
+AskUok:		CLC
+		SBC #47					; Subtract 48 - Device# in .A
+		STA SCREEN_RAM+74
 		RTS
 
 AskAbort:	LDA #0					; Return a NULL
@@ -519,28 +528,33 @@ AnyKey:		JSR GETIN				; Get keystroke to .A
 ;======================================================================================
 ; Displays the directory in the proper location
 
-ShowLeftDir:	LDA LDMEMHI			; HI Pointer to LEFT Directory Buffer
-		JSR SetDirMem			; Set Memory Pointers
-		LDA #DIRCOL0			; LEFT directory column
-		LDY LDEND			; Index of LEFT last entry
-		JMP ShowTest
+ShowActiveDir:
+		LDA DDEV			; Check if drive selected
+		BNE ShowDirectory		; No, ok
+		RTS				; Yes, nothing to show
 
-ShowRightDir:	LDA RDMEMHI			; HI Pointer to LEFT Directory Buffer
-		JSR SetDirMem			; Set Memory Pointers
-		LDA #DIRCOL1			; LEFT directory column
-		LDY RDEND			; Index of LEFT last entry
-
-ShowTest:	STA DCOL			; Directory Column
-		STY DEND			; Index of last entry
-		CPY #0				; Is DEND zero?
-		BNE ShowDirectory		; No, good to go
-		RTS				; Yes, nothing to show!
-
-SetDirMem:	STA DMEMHI			; HI Top Index Memory Pointer
-		STA ZP3+1			; HI Work Pointer
-		LDA #2				; LO starts at 2
-		STA ZP3				; LO Work Pointer
-		RTS
+;ShowLeftDir:	LDA LDMEMHI			; HI Pointer to LEFT Directory Buffer
+;		JSR SetDirMem			; Set Memory Pointers
+;		LDA #DIRCOL0			; LEFT directory column
+;		LDY LDEND			; Index of LEFT last entry
+;		JMP ShowTest
+;
+;ShowRightDir:	LDA RDMEMHI			; HI Pointer to LEFT Directory Buffer
+;		JSR SetDirMem			; Set Memory Pointers
+;		LDA #DIRCOL1			; LEFT directory column
+;		LDY RDEND			; Index of LEFT last entry
+;
+;ShowTest:	STA DCOL			; Directory Column
+;		STY DEND			; Index of last entry
+;		CPY #0				; Is DEND zero?
+;		BNE ShowDirectory		; No, good to go
+;		RTS				; Yes, nothing to show!
+;
+;SetDirMem:	STA DMEMHI			; HI Top Index Memory Pointer
+;		STA ZP3+1			; HI Work Pointer
+;		LDA #2				; LO starts at 2
+;		STA ZP3				; LO Work Pointer
+;		RTS
 
 
 ;======================================================================================
@@ -727,12 +741,13 @@ GS_DONE		JSR UNTLK			; UNTALK
 PrepDir:	LDY ACTIVE			; Get Active directory
 		BNE Prep1
 
-Prep0:		LDA LDMEMHI			; HI Pointer to Directory Storage Address
+Prep0:
+		LDA LDMEMHI			; HI Pointer to Directory Storage Address
 		STA DMEMHI			;
-		LDA LDDEV			; Device#
-		STA DDEV
-		LDA LDUNIT			; Unit#
-		STA DUNIT				
+;		LDA LDDEV			; Device#
+;		STA DDEV
+;		LDA LDUNIT			; Unit#
+;		STA DUNIT				
 
 		JMP PrepCommon
 
@@ -759,7 +774,11 @@ SetU1:		LDA #<FNDir1			; LO Pointer to Filename ("$1")
 
 PrepDev:	LDA DDEV			; LEFT Device#
 		STA FA				; Set Device Number
-		;JSR LoadDirectory		; LoadDirectory routine must immediately follow!
+CheckValDir:	BNE LoadDirectory		; If Device>0 then ok
+
+		LDY #16				; no device! tell them
+		JSR ClearMsgNM			; print it
+		RTS
 
 ;======================================================================================
 ; LOAD DIRECTORY
@@ -771,6 +790,8 @@ PrepDev:	LDA DDEV			; LEFT Device#
 
 ;-------------- Prep
 LoadDirectory:
+		LDA DMEMHI			; HI Start of Directory buffer
+		STA ZP1+1
 		LDA #0				; Clear pointers
 		STA ZP1				; LO Work Pointer
 		STA DTOP			; Index of TOP entry
@@ -796,7 +817,8 @@ LoadDirectory:
 		JSR TALK			; talk
 		LDA SA				; Secondary Address
 		JSR SECND			; Set Secondary Address
-
+		LDX STATUS
+		BNE LDError
 SkipLA:		JSR ACPTR			; Read two bytes Load Address
 		JSR ACPTR			; and discard
 
@@ -863,7 +885,19 @@ Entry_done:	LDA DCOUNT			; Get Counter
 		INC DEND			; End=End+1
 		JMP LoadEntry			; No, Jump back for more lines
 
+;-------------- Disk Error
+
+LDError:	JSR CLSEI			; close file with $E0, unlisten
+		JSR $E015			; Clear screen
+		JSR GetDiskStatus		; Show error
+		LDA #0
+		STA DCOUNT
+		STA DEND
+		JSR AnyKey
+		RTS
+
 ;-------------- Listing is complete
+
 
 StopListing:	JSR CLSEI			; close file with $E0, unlisten
 		LDY #5				; "entries:"
@@ -914,35 +948,56 @@ IncZP1X:	RTS
 ; Set LEFT  to Device 8, unit 0.
 ; Set RIGHT to Device 8, unit 1
 InitStuff:
-		LDX #1
-		STX RDUNIT			; RIGHT Unit#1
+		LDA #<TAPEBUFFER
+		STA ZP1
+		LDA #>TAPEBUFFER
+		STA ZP1+1
 
-		LDX #0				; Make our data start on page boundry
-		STX ACTIVE			; Active Directory Listing (0/1)
-		STX LDUNIT			; LEFT  Unit#0
+;-------------- Initialize Our Memory storage area
 
-		LDX STREND+1			; HI End of Arrays
+		LDY #190			; length of tape buffer
+		LDA #0				; zero
+InitMyMem:	STA (ZP1),Y			; write it
+		DEY				; decrement index
+		BNE InitMyMem			; Is it zero? no, go back for more
+
+;-------------- Initialize Storage Pointers
+
+InitDirMem:	LDX STREND+1			; HI End of Arrays
 		INX				; Start on boundry of next page
 		TXA
 		CLC
 
 !IF SCREENSAVE=1 {
 		STX SCNMEMHI			; HI Screen Save Buffer
-		ADC #8				; Reserve 8 pages for 80-col screen
+		ADC #SCREENPAGES		; Reserve 8 pages for 80-col screen
 }
+;-------------- Set LEFT and RIGHT buffer areas
+; We reserve 24 pages each. This needs 6K per directory and a max of 255 entries
 
 		STA LDMEMHI			; HI LEFT Directory Buffer
 		ADC #24				; Reserve 24 pages (6K) for LEFT Dir
 		STA RDMEMHI			; HI RIGHT Directory Buffer
 
-		LDA #8				; Default Drive=8
-		STA MYDRIVE			; Set it
-		STA LDDEV			; LEFT  Device#
-		STA RDDEV			; RIGHT Device#
+;-------------- Set up Default LEFT (Active) Directory
+;
+; Since our memory is initialized to all zeros, we only need to set a few memory locations
+; Since the Active directory defaults to the LEFT when we switch to the RIGHT these
+; will be copied to the LEFT storage area
+
+		LDA #8	;$FA			; Last device accessed
+		STA DDEV			; LEFT  Device#
 		LDA #DIRROW0			; Set up LEFT ROW,COL for Listing
-		STA LDROW
+		STA DROW			; LEFT Row
 		LDA #DIRCOL0
-		STA LDCOL
+		STA DCOL			; LEFT Col
+
+;-------------- Set up RIGHT Directory
+;
+; We only need a pointer to the start of the directory buffer (set above) and the
+; ROW/COL where it will be displayed. The device and unit# must be supplied by
+; the user when they switch to the RIGHT.
+
 		LDA #DIRROW1			; Set up RIGHT ROW,COL for Listing
 		STA RDROW
 		LDA #DIRCOL1
@@ -1143,41 +1198,44 @@ PNMexit:	RTS
 
 NMAdLo:	!BYTE <NM0,<NM1,<NM2,<NM3,<NM4,<NM5,<NM6,<NM7		; 0-7
 	!BYTE <NM8,<NM9,<NM10,<NM11,<NM12,<NM13,<NM14,<NM15	; 8-15
+	!BYTE <NM16						; 16-
+
 NMAdHi:	!BYTE >NM0,>NM1,>NM2,>NM3,>NM4,>NM5,>NM6,>NM7		; 0-7
 	!BYTE >NM8,>NM9,>NM10,>NM11,>NM12,>NM13,>NM14,>NM15	; 8-15
+	!BYTE >NM16						; 16-
 
-NM0:	!BYTE 0					; For print@ 
-NM1:	!BYTE 19,19,147,17,0			; <HOME><HOME><CLS><DOWN>
+NM0:	!BYTE 0						; For print@ 
+NM1:	!BYTE 19,19,147,17,0				; <HOME><HOME><CLS><DOWN>
 NM2:	!PET "quit: ",0					
-NM3:	!PET "device# ("			; Device selection (8-12)
+NM3:	!PET "device# ("				; Device selection prompt
 	!PET RVS,"8",ROFF," "
 	!PET RVS,"9",ROFF," 1"
 	!PET RVS,"0",ROFF," 1"
 	!PET RVS,"1",ROFF," 1"
 	!PET RVS,"2",ROFF,")?",0
 
-NM4:	!PET "unit (0,1)?",0
-NM5:	!PET "entries:",0
-NM6:	!PET "reading...",0
-NM7:	!PET "copying...",0
-NM8:	!PET "renaming...",13,0
-NM9:	!PET "load prg: ",0			; Load prompt
-NM10:	!PET 147,"dL",0				; <CLS>dL<QUOTE> - Pre-filename
-NM11:	!PET ",d0,u8",0				; d0,u8          - Post-filename
+NM4:	!PET "unit (0,1)?",0				; Unit selection prompt
+NM5:	!PET "entries:",0				; Dir info
+NM6:	!PET "reading...",0				; Reading...
+NM7:	!PET "copying...",0				; Copying...
+NM8:	!PET "renaming...",13,0				; Rename...
+NM9:	!PET "load prg: ",0				; Load prompt
+NM10:	!PET 147,"dL",0					; <CLS>dL<QUOTE> - Pre-filename
+NM11:	!PET ",d0,u8",0					; d0,u8          - Post-filename
 
-NM12:	!PET RVS,"cls"   ,ROFF,"drive "		; Select Drive
-	!PET RVS,"/"     ,ROFF,"switch "	; Switch Sides
-	!PET RVS,"crsr"  ,ROFF,"sel "		; Cursor
-	!PET RVS,"home"  ,ROFF,"top "		; Home
-	!PET RVS,"<>"    ,ROFF,"page "		; Page Up/Down
-	!PET RVS,"spc"   ,ROFF,"mark "		; Space
-	!PET RVS,"rtn"   ,ROFF,"run/cd "	; Return
+NM12:	!PET RVS,"cls"   ,ROFF,"drive "			; Select Drive
+	!PET RVS,"/"     ,ROFF,"switch "		; Switch Sides
+	!PET RVS,"crsr"  ,ROFF,"sel "			; Cursor
+	!PET RVS,"home"  ,ROFF,"top "			; Home
+	!PET RVS,"<>"    ,ROFF,"page "			; Page Up/Down
+	!PET RVS,"spc"   ,ROFF,"mark "			; Space
+	!PET RVS,"rtn"   ,ROFF,"run/cd "		; Return
 	!PET RVS,"q"     ,ROFF,"quit",0	; Quit
 
-NM13:	!PET "are you sure (y/n)?",0		; Are you Sure?
-NM14:	!PET "stevebrowse 2021-04-15",0 	; Title text
-NM15:   !PET "dev:xx unit:x ",0			; Device# and Unit# display
-
+NM13:	!PET "are you sure (y/n)?",0			; Are you Sure?
+NM14:	!PET "stevebrowse 2021-04-17",0 		; Title text
+NM15:   !PET "dev:xx unit:x ",0				; Device# and Unit# display
+NM16:	!PET "no drive selected. press <cls>!",0	;
 
 ;======================================================================================
 ; SCREEN LINE ADDRESS TABLE
@@ -1188,18 +1246,18 @@ NM15:   !PET "dev:xx unit:x ",0			; Device# and Unit# display
 ;
 ;---------- 40 characters wide
  
-SLA40_Lo	!byte $00,$28,$50,$78,$a0,$c8,$f0,$18,$40,$68,$90,$b8,$e0
+SLA40_Lo:	!byte $00,$28,$50,$78,$a0,$c8,$f0,$18,$40,$68,$90,$b8,$e0
 		!byte $08,$30,$58,$80,$a8,$d0,$f8,$20,$48,$70,$98,$c0
 
-SLA40_Hi	!byte $80,$80,$80,$80,$80,$80,$80,$81,$81,$81,$81,$81,$81
+SLA40_Hi:	!byte $80,$80,$80,$80,$80,$80,$80,$81,$81,$81,$81,$81,$81
 		!byte $82,$82,$82,$82,$82,$82,$82,$83,$83,$83,$83,$83
 
 ;---------- 80 characters wide 
 
-SLA80_Lo	!byte $00,$50,$a0,$f0,$40,$90,$e0,$30,$80,$d0,$20,$70,$c0
+SLA80_Lo:	!byte $00,$50,$a0,$f0,$40,$90,$e0,$30,$80,$d0,$20,$70,$c0
 		!byte $10,$60,$b0,$00,$50,$a0,$f0,$40,$90,$e0,$30,$80
 
-SLA80_Hi	!byte $80,$80,$80,$80,$81,$81,$81,$82,$82,$82,$83,$83,$83
+SLA80_Hi:	!byte $80,$80,$80,$80,$81,$81,$81,$82,$82,$82,$83,$83,$83
 		!byte $84,$84,$84,$85,$85,$85,$85,$86,$86,$86,$87,$87
 
 
