@@ -31,7 +31,7 @@ SCREENSAVE	= 1			; Include Screen Save Options
 
 SCREENPAGES     = 8			; 2K size for 80 col
 DIRWIDTH        = 21			; Width  of directory windows
-DIRHEIGHT	= 18			; Height of directory windows
+DIRHEIGHT	= 18			; Height of directory windows + 1 for header
 DIRROW0		= 2			; LEFT  Directory Top-Left position
 DIRCOL0		= 0			; LEFT  
 DIRROW1		= 2			; RIGHT Directory Top-Left position
@@ -92,7 +92,7 @@ CMDJUMP		= $C2			; LO Command Jump
 
 ;-------------- $ED-$F7 not used in 80-column machines. Safe to use here for now?
 
-ZP1		= $EE			; Srce Pointer - Scn Cpy, String Print
+ZP1		= $EE			; Src  Pointer - Scn Cpy, String Print
 ZP2		= $F0			; Dest Pointer - Scn Cpy
 ZP3		= $F2			; Work Pointer - Directory display
 ;		= $F4			; FREE
@@ -104,11 +104,11 @@ ZP3		= $F2			; Work Pointer - Directory display
 ; TODO: instead of copying individual bytes we should copy the entire block for
 ;       LEFT or RIGHT to/from ZP locations for current DIR memory.
 
-TAPEBUFFER      = $027A			; 634   Tape buffer
+TAPEBUFFER      = $0381			; End of Tapebuffer2 (was: TapeBuffer#1=$027A)
 
 SCREENMEM	= TAPEBUFFER
 LEFTMEM		= TAPEBUFFER+10		; Start of LEFT  Memory Structure
-RIGHTMEM	= TAPEBUFFER+20		; Start of RIGHT Memory Structure
+RIGHTMEM	= TAPEBUFFER+30		; Start of RIGHT Memory Structure
 
 ;-------------- Screen Save
 
@@ -176,9 +176,8 @@ Start:
 		JSR SaveScreen }		; Save the screen to memory
 		JSR FindScnWidth		; Determine width of screen
 		JSR DrawUI			; Draw the interface
-		JSR PrepDir			; Load the ACTIVE directory		
-		JSR ShowActiveDir		; Show the RIGHT directory
-		JSR ILoopStat			; Interactive Loop with Stat update - Loops until Exit
+		JSR PrepDir			; Load the ACTIVE directory
+		JSR IRestart			; Interactive Loop until exit. Start with Refresh
 BrowseDone:	RTS				; Exit Program
 
 
@@ -221,8 +220,6 @@ Interact:
 		JSR GETIN			; Get keystroke to .A
 		BEQ Interact			; No press, go back
 
-		STA DEBUGRAM + 1		; DEBUG!!!!!!!!!!!!!!!!!!
-
 		STA CMDKEY			; Save Key
 
 		LDY #0				; Set Index to start of table
@@ -242,11 +239,12 @@ KeyFound:	DEY				; Yes, index to previous key
 ;-------------- Post-command actions
 
 IRestart:	JSR DrawUI			; Re-draw GUI
+IRefreshStat:	JSR ShowKeyBar			; Show Key Help line
 IRefresh:	JSR ShowDirectory		; Re-draw Directory
 		JMP Interact
 
 ILoopStat:	JSR ShowKeyBar			; Show Key Help line
-ILoop		JMP Interact
+ILoop:		JMP Interact
 
 ShowPET:
 !IF SCREENSAVE=1{
@@ -295,29 +293,24 @@ IsDownOK:	INC DSEL			; Move SELECTED down
 
 IsDexit:	JMP IRefresh
 
-;-------------- Perform Select Directory LEFT/RIGHT
+;-------------- Perform LEFT/RIGHT - Select Directory
 
 IsLeft:		LDA ACTIVE			; From RIGHT to LEFT.
-		STA DEBUGRAM+16			; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
 		BNE ISLRdo			; Is RIGHT active? Yes, do it
 		BEQ ILoop			; No, LEFT - Ignore
 
 IsRight:	LDA ACTIVE			; From LEFT to RIGHT
-		STA DEBUGRAM+17			; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 		BNE ILoop			; Is RIGHT active? Yes, Ignore
 
-ISLRdo:		LDA #4				; "D"
-		STA DEBUGRAM+15
-		JSR SwapActive
-		JMP IRefresh
+ISLRdo:		JSR SwapActive
+		JMP IRefreshStat
 
 ;-------------- Perform HOME
 
 IsHome:		LDY #1				; First Entry
 		STY DTOP			; Set TOP
 		STY DSEL			; Set SELECTED
-		JSR DrawUI
+		JSR DrawUI			; Re-draw the Interface
 		JMP IRefresh
 
 ;-------------- Perform SPACE
@@ -381,8 +374,8 @@ IsCLS:		JSR AskDevice			; Ask and input Device#. Returns 8-15 in .A
 		STA DDEV			; Store Device#
 		JSR AskUnit			; Ask and input Unit#. Returns 0 or 1
 		STA DUNIT			; Store Unit#
-		JSR PrepDir			; Get the new directory
-		JMP IRefresh			; 
+		JSR LoadDirectory		; Get the new directory
+		JMP IRefreshStat
 CLSabort:	JMP ILoopStat			; Return and clear status line
 
 
@@ -397,7 +390,7 @@ IsRETURN:	LDY #19				; Index to FILETYPE Character
 		BEQ ChangeDIR			; Yes, Change Directory
 		CMP #66				; "C"? - CBM file (1581 and?)
 		BEQ SelPart			; Tes, Select Partition
-		JMP IRefresh
+		JMP IRefreshStat
 
 ;-------------- Do File Load
 
@@ -447,25 +440,18 @@ SwapActive:	JSR SaveActive
 		EOR #1				; Toggle Active Bit
 		STA ACTIVE
 		JSR LoadActive
-		JMP IRefresh
+		RTS				; Return to / routine!
 
 ;-- Save and Load Active
 
-SaveActive:
-		LDA #62				; ">"
-		STA DEBUGRAM+14
-		JSR GetCurrent			; Get Current Directory ZP mem to .A and .X
+SaveActive:	JSR GetCurrent			; Get Current Directory ZP mem to .A and .X
 		JSR SetSource
 		JSR GetActive			; Get Active Mem pointer to .A and .X
 		JSR SetDest
 		JSR XferIt			; Do the Transfter
 		RTS
 
-LoadActive:
-		LDA #60				; "<"
-		STA DEBUGRAM+13
-
-		JSR GetCurrent			; Get Current Directory ZP mem to .A and .X
+LoadActive:	JSR GetCurrent			; Get Current Directory ZP mem to .A and .X
 		JSR SetDest
 		JSR GetActive			; Get Active Mem pointer to .A and .X
 		JSR SetSource
@@ -511,21 +497,10 @@ XferIt:		LDY #0				; Number of bytes to transfer
 XferLloop:	LDA (ZP1),Y			; Read it
 		STA (ZP2),Y			; Write it
 		INY				; Next byte
-		CPY #10				; Are we at the end?
+		CPY #11				; Are we at the end?
 		BNE XferLloop			; No, go back for more
 		RTS
 
-
-
-;======================================================================================
-; SETUP FOR LEFT/RIGHT DIRECTORY
-;======================================================================================
-; Displays the directory in the proper location
-
-ShowActiveDir:
-		LDA DDEV			; Check if drive selected
-		BNE ShowDirectory		; No, ok
-		RTS				; Yes, nothing to show
 
 ;======================================================================================
 ; SET DIRECTORY MEMORY POINTER 
@@ -549,7 +524,15 @@ SetDirPtr:	LDA DMEMHI			; HI Top Index Memory Pointer
 ; DENTRY points to current entry being looked at.
 ; DSEL is the enry that is SELECTED. 
 
-ShowDirectory:  JSR SetDirPtr			; Always start at HEADER!		
+ShowDirectory:	LDA DDEV			; Check if drive selected
+		BEQ ShowIsOff			; No, forget about it
+		LDA DEND			; Check END
+		BNE ShowDstart			; Ok, good to go
+
+ShowIsOff:	LDY #16				; "No Dir loaded"
+		JMP ClearMsgNM			; Print it and end
+
+ShowDstart:	JSR SetDirPtr			; Always start at HEADER!		
 		LDY #0				; Top Entry (HEADER)
 		STY DENTRY			; Point to Header
 		STY DBOT			; BOTTOM Index
@@ -564,7 +547,6 @@ SDloop:		LDA DROW			; Cursor Position for Top Left
 		TAX
 		LDA DCOL			; Column for selected directory
 		JSR CursorAt			; Move cursor to top of directory
-
 		LDY #0				; Index for print loop
 		STY ReverseFlag			; also, set <RVS> off
 
@@ -640,7 +622,6 @@ SDnext2:	LDA DCOUNT			; Get it again
 SDexit:		LDA DENTRY			; Last ENTRY 
 		STA DBOT			; save it for DBOT
 		DEC DBOT			; adjust
-		JSR GetDiskStatus		; Show Disk Status
 		RTS
 
 
@@ -716,8 +697,8 @@ SENDCMDDONE	JSR UNLSN			; un-listen
 ; Read the status string: ##,String,TT,SS
 ; Print to STATUS line
 
-GetDiskStatus:	LDX #DSROW			; Disk Status ROW
-		JSR CursorR			; Set the cursor to start of Row
+GetDiskStatus:	LDY #17				; Disk Status ROW
+		JSR ClearMsgNM			; Set the cursor to start of Row
 
 		LDA DDEV			; Current Device#
 		STA FA				; Set device number
@@ -900,6 +881,9 @@ StopListing:	JSR CLSEI			; close file with $E0, unlisten
 		LDY #1				; First filename (ie: skip header)
 		STY DTOP			; Top of listing
 		STY DSEL			; Select it
+
+		JSR GetDiskStatus		; Show Disk Status
+
 		RTS
 
 
@@ -997,10 +981,6 @@ InitDirMem:	LDX STREND+1			; HI End of Arrays
 		STA RDROW
 		LDA #DIRCOL1
 		STA RDCOL
-		LDA #9				; Set default to 9;0
-		STA RDDEV
-		LDA #1
-		STA RDUNIT
 		RTS
 
 
@@ -1263,7 +1243,8 @@ PrintClear:	STY TEMPMSG			; Save Msg#
 		LDY TEMPMSG			; Re-load Msg#
 		JMP PrintNM
 
-;--------------
+;-------------- Print At ROW,0 or ROW,COL
+
 PrintRowNM:	LDA #0				; Col=0
 PrintAtNM:	JSR SetCursorAX			; Position Cursor. .Y preserved
 
@@ -1288,11 +1269,11 @@ PNMexit:	RTS
 
 NMAdLo:	!BYTE <NM0,<NM1,<NM2,<NM3,<NM4,<NM5,<NM6,<NM7		; 0-7
 	!BYTE <NM8,<NM9,<NM10,<NM11,<NM12,<NM13,<NM14,<NM15	; 8-15
-	!BYTE <NM16						; 16-
+	!BYTE <NM16,<NM17						; 16-
 
 NMAdHi:	!BYTE >NM0,>NM1,>NM2,>NM3,>NM4,>NM5,>NM6,>NM7		; 0-7
 	!BYTE >NM8,>NM9,>NM10,>NM11,>NM12,>NM13,>NM14,>NM15	; 8-15
-	!BYTE >NM16						; 16-
+	!BYTE >NM16,>NM17					; 16-
 
 NM0:	!BYTE 0						; For print@ 
 NM1:	!BYTE 19,19,147,17,0				; <HOME><HOME><CLS><DOWN>
@@ -1321,9 +1302,11 @@ NM12:	!PET RVS,"/"	,ROFF,"drive "			; Select Drive
 	!PET RVS,"q"    ,ROFF,"quit",0			; Quit
 
 NM13:	!PET "are you sure (y/n)?",0			; Are you Sure?
-NM14:	!PET "stevebrowse 2021-04-18",0 		; Title text
+NM14:	!PET "stevebrowse 2021-04-20",0 		; Title text
 NM15:   !PET "dev:xx unit:x ",0				; Device# and Unit# display
-NM16:	!PET "no drive selected. press '/'!",0	;
+NM16:	!PET "hit '/' to select!",0			;
+NM17:	!PET "ds: ",0					; Disk Status
+
 
 ;======================================================================================
 ; SCREEN LINE ADDRESS TABLE
