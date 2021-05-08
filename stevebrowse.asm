@@ -43,12 +43,17 @@ SCNSAVE1	= $B2				; Cursor pointer LO
 SCNSAVE2	= $B3				; Cursor pointer HI
 SCNSAVE3	= $B4				; Cursor offset
 SCNSAVE4	= $B5				;
-SCNMEM		= $B6				; Screen Save Location
-LDIRMEM		= $B8				; Directory Start
-LDIRTOP		= $BA				; LEFT  Index of Top Entry
-LDIRSEL		= $BB				; LEFT  Index of selected entry
-LDIREND		= $BC				; LEFT  Index of Last Entry
-
+CMDMEM		= $B6				; DOS Command Buffer Location
+SCNMEM		= $B8				; Screen Save Buffer Location
+LDIRMEM		= $BA				; LEFT Directory Buffer Start
+LDIRTOP		= $BB				; LEFT Index of Top Entry
+LDIRSEL		= $BC				; LEFT Index of selected entry
+LDIREND		= $BD				; LEFT Index of Last Entry
+TMP1		= $BE
+TMP2		= $BF
+TMP3		= $C0
+TMP4		= $C1
+TMP5		= $C2
 DTMP		= $C3				; Temp counter
 
 ; $ED-$F7 not used in 80-column machines. Safe to use here for now?
@@ -173,7 +178,7 @@ DirBox3:	!BYTE $AD					; Bottom Left Corner
 KeyBar:		!PET "up/dn=sel,return=run/cd, r=root",19,0	; Keys <home> - NO CR
 
 ClsCrDot	!BYTE 147,13,46,0				; CLS, CR, PERIOD
-FNDirectory:	!PET "$",0					; Directory string
+DirFN:		!PET "$0",0					; Directory string
 
 ;-------------- My Print Routine
 
@@ -239,9 +244,9 @@ GS_DONE		jsr SCROUT			; write <CR> to screen
 
 GDS1:		!PET "drive status: ",0
 
-;-------------- LOAD LEFT/RIGHT DIRECTORY
-; Sets up pointers for LEFT/RIGHT directory
-; !!!! For now they will use the same memory
+;-------------- LOAD LEFT DIRECTORY
+; Sets up RAM pointer for LEFT directory. Clears Top of list and Selected indexes.
+; Entries are saved to RAM and counted. Index to last entry is put in LDIREND.
 
 LoadLeftDir:
 		LDA #0				; Counter
@@ -259,14 +264,15 @@ LoadLeftDir:
 
 ;-------------- LOAD DIRECTORY
 ; Reads the directory into RAM pointed to by ZP1.
-; Counts # of directory entries to DTMP.
+; Counts # of directory entries to DTMP. Maximum of 255 entries.
+; Currently reads and stores bytes exactly as reveived from drive.
 
 LoadDirectory:
-		LDA #<FNDirectory		; LO Pointer to Filename ("$")
+		LDA #<DirFN		; LO Pointer to Filename ("$")
 		STA FNADR			; LO Filename Address pointer
-		LDA #>FNDirectory		; HI
+		LDA #>DirFN		; HI
 		STA FNADR+1			; HI 
-		LDY #1				; Length=1
+		LDY #2				; Length=1
 		STY FNLEN			; Save it
 
 		LDA #0				; Clear the status byte
@@ -280,54 +286,30 @@ LoadDirectory:
 		LDA SA
 		JSR SECND
 
-		ldy #3				; Why 3? First line is header
+;-------------- Read the directory
 
-;-------------- Read the file's block usage
-list_blocks
-		sty FNLEN			; ??? First time=3, remaining=2 is header different?
-		jsr ACPTR			; read block byte#1 from IEEE
-		LDY #0
+dir_loop
+		JSR ACPTR			; read a byte from IEEE  /was: read block byte#1 from IEEE
+		CMP #0				; is it a zero byte (end of line)?
+		BEQ entrydone
+		LDY #0				; Index is always 0 since we are incrementing pointer
 		STA (ZP1),Y			; store blocks LSB
-		INY
-;		lda STATUS			; did it read ok?
-;		bne stoplisting			; no, finish
+		LDX STATUS			; did it read ok?
+		BNE stoplisting			; no, finish
+		INC ZP1				; next memory location
+		BNE dir_loop			; if not crossing page then loop for more
+		INC ZP1+1			; next page
+		BNE dir_loop			; go get more
 
-		jsr ACPTR			; read block byte#2 from IEEE
-list		sta (ZP1),Y			; store blocks MSB
-		ldy STATUS			; did it read ok?
-		bne stoplisting			; no, finish
-
-		ldy FNLEN
-		dey 
-		bne list_blocks
-
-;		lda #'*'			; <SPACE>
-;		jsr SCROUT			; print it
-
-;-------------- Read the filename and type
-
-LISTLOOP	jsr ACPTR			; read byte from IEEE
-		ldx STATUS			; did it read ok?
-		bne stoplisting			; no, so exit
-		cmp #0				; end of line?
-		beq newline			; yes, break out
-		LDY #0
-		sta (ZP1),Y			; write to RAM
-		inc ZP1
-		bne LISTLOOP			;llskip
-		inc ZP1+1
-		jmp LISTLOOP			; go back for more
-
-;-------------- Line is complete
-
-newline
+;-------------- Entry is Complete
+entrydone
 		LDA DTMP			; Get Counter
 		STA SCREEN_RAM+39		; debug. show count
 		CMP #255			; Is it 255?
 		BEQ stoplisting			; Yes, Maximum entries, so exit
 		INC DTMP			; Counter=Counter+1
 		ldy #2				; Why 2? 2=normal entry?
-		bne list_blocks			; Jump back for more lines
+		bne dir_loop			; Jump back for more lines
 
 ;-------------- Listing is complete
 
@@ -493,7 +475,7 @@ ProgMarker	!PET "!",0					; DEBUG Marker
 ;-------------- DEBUG Strings
 
 TEMP1:		!PET 13,"reading: ",0
-TEMP2:		!PET 13,"directory complete",13,0
+TEMP2:		!PET 13,"dir loaded!",13,0
 
 ;======================================================================================
 ; PADD to 4K to be able to load into VICE
