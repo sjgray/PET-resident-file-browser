@@ -25,7 +25,7 @@ CLEARSCREEN	= $E015			; Clear the screen
 
 ;-------------- Program Options
 
-SCREENSAVE	= 0			; Include Screen Save Options
+SCREENSAVE	= 1			; Include Screen Save Options
 
 ;-------------- Constants
 
@@ -41,7 +41,7 @@ MYDRIVE		= 8			; Default Drive Number, ie: 8
 DRIVEUNIT	= 0			; Default Unit Numberm ie: 0 or 1
 DRECLEN		= 23			; Record length for ram directory
 
-DEBUGRAM	= SCREEN_RAM+24*80+70	; Address  of Debug       ROW
+DEBUGRAM	= SCREEN_RAM+23*80+60	; Address  of Debug       ROW
 
 PROGROW		= 0			; Location of Program Info ROW
 DSROW		= 21			; Location of DiskST/File  ROW
@@ -170,24 +170,38 @@ RDSELMEM	= RIGHTMEM+9		; RIGHT LO Selected Item Memory
 *=$A000			; Put this in the $A Option ROM - SYS40960
 
 Start:
-
 		JSR InitStuff			; Do some intialization stuff
 !IF SCREENSAVE=1 {
 		JSR SaveCursorPos		; Save cursor position
-		JSR SaveScreen			; Save the screen to memory
-}
+		JSR SaveScreen }		; Save the screen to memory
 		JSR FindScnWidth		; Determine width of screen
-		
 		JSR DrawUI			; Draw the interface
 		JSR PrepDir			; Load the ACTIVE directory		
 		JSR ShowActiveDir		; Show the RIGHT directory
-
 		JSR ILoopStat			; Interactive Loop with Stat update - Loops until Exit
 BrowseDone:	RTS				; Exit Program
 
-;TestMsg1:	!PET "[test1]",13,0
-;TestMsg2:	!PET "[test2]",13,0
-;TestMsg3:	!PET "[test3]",13,0
+
+;======================================================================================
+; DEBUG TO SCREEN !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;======================================================================================
+; Visible display of certain memory locations on screen
+
+ShowDEBUG:	INC DEBUGRAM
+		LDY ACTIVE
+		STY DEBUGRAM+1
+		LDY DTOP
+		STY DEBUGRAM+4
+		LDY DSEL
+		STY DEBUGRAM+5
+		LDY DBOT
+		STY DEBUGRAM+6
+		LDY DEND
+		STY DEBUGRAM+7
+		LDY DENTRY
+		STY DEBUGRAM+8
+		RTS
+
 
 ;======================================================================================
 ; Interactive 
@@ -196,15 +210,14 @@ BrowseDone:	RTS				; Exit Program
 ; keystrokes and acts on them, looping around until user exits.
 
 ;-------------- Command Key Table and Address Lo/HI Tables
-;       	KEY:   Q     , DOWN  , UP  , HOME  , SPACE  , <     , >     , /      , CLS  , RETURN  ,NULL
-CMDTABLE:	!BYTE  81    , 17    , 145 , 19    , 32     , 62    , 60    , 47     , 147  , 13      ,0
-CMDLO:		!BYTE <IsQuit,<IsDown,<IsUp,<IsHome,<IsSpace,<IsPgDn,<IsPgUp,<IsSlash,<IsCLS,<IsRETURN
-CMDHI:		!BYTE >IsQuit,>IsDown,>IsUp,>IsHome,>IsSpace,>IsPgDn,>IsPgUp,>IsSlash,>IsCLS,>IsRETURN
+;       	KEY:   Q     , DOWN  , UP  , LEFT  , RIGHT  , HOME  , SPACE  , [     , ]     , /      , CLS  , RETURN  ,NULL
+CMDTABLE:	!BYTE  81    , 17    , 145 ,  157  , 29     , 19    , 32     , 91    , 93    , 47     , 147  , 13      ,0
+CMDLO:		!BYTE <IsQuit,<IsDown,<IsUp,<IsLeft,<IsRight,<IsHome,<IsSpace,<IsPgUp,<IsPgDn,<IsSlash,<IsCLS,<IsRETURN
+CMDHI:		!BYTE >IsQuit,>IsDown,>IsUp,>IsLeft,>IsRight,>IsHome,>IsSpace,>IsPgUp,>IsPgDn,>IsSlash,>IsCLS,>IsRETURN
 
 ;-------------- Interactive Dispatch
 Interact:
-		INC DEBUGRAM			; DEBUG!!!!!!!!!!!!!!!!!!!!!
-
+		JSR ShowDEBUG			; DEBUG!!!!!!!!!!!!!!!!!!!!!
 		JSR GETIN			; Get keystroke to .A
 		BEQ Interact			; No press, go back
 
@@ -231,13 +244,14 @@ KeyFound:	DEY				; Yes, index to previous key
 IRestart:	JSR DrawUI			; Re-draw GUI
 IRefresh:	JSR ShowDirectory		; Re-draw Directory
 		JMP Interact
+
 ILoopStat:	JSR ShowKeyBar			; Show Key Help line
-ILoop:		JMP Interact			; Loop back for more
+ILoop		JMP Interact
 
 ShowPET:
 !IF SCREENSAVE=1{
-		JSR RestoreScreen		; Restore the screen
-		JSR RestoreCursorPos		; Restore cursor position
+		JSR RestScreen			; Restore the screen
+		JSR RestCursorPos		; Restore cursor position
 } ELSE {
 		JSR CLEARSCREEN			; Clear the screen
 }
@@ -257,41 +271,51 @@ IsQuit:		JSR AskQuit			; Prompt to Exit
 ;-------------- Perform UP
 
 IsUp:		LDY DSEL			; SELECTED Entry
+		CPY #1				; Is it first entry?
+		BEQ NoUp			; Yes, no scrolling up
 		CPY DTOP			; Is it at TOP?
-		BEQ YesTop			; Yes, try to scroll up. skip ahead
-		DEC DSEL			; No, it's safe to move to prev entry
-		JMP IRefresh			; Redraw directory
-
-YesTop:		LDY DTOP			; Get TOP
-		BEQ ILoop			; Is it Zero? no moving up. skip
-
-		DEC DTOP			; Move TOP Up
-		DEC DSEL			; Move SELECTED Up
-NoUp:		JMP IRefresh			; Refresh
-		
+		BNE YesUp			; No, ok to move selected up. skip ahead
+YesTop:		DEC DTOP			; Move entire list up
+YesUp:		DEC DSEL			; Move SELECTED Up
+NoUp:		JMP IRefresh			; Refresh		
 
 ;-------------- Perform DOWN		
 
 IsDown:		LDY DSEL			; SELECTED entry
-		CPY DEND			; Is is at the END?
+		CPY DEND			; Is is at END of directory?
 		BEQ ILoop			; Yes, can't go down. abort.
 
-		INC DEBUGRAM+2			; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-		CPY DBOT			; Is it at BOTTOM
+		CPY DBOT			; Is it at BOTTOM of displayed?
 		BEQ IsDownOK			; Yes, need to scroll
-		INC DSEL			; No, just inc SELECTED
-		BNE IRefresh		
+		INC DSEL			; No, just move SELECTED down
+		BNE IsDexit
 
-IsDownOK	INC DSEL			; Move SELECTED down
-		INC DTOP
+IsDownOK:	INC DSEL			; Move SELECTED down
+		INC DTOP			; Move TOP down
+
+IsDexit:	JMP IRefresh
+
+;-------------- Perform Select Directory LEFT/RIGHT
+
+IsLeft:		LDA ACTIVE			; From RIGHT to LEFT.
+		STA DEBUGRAM+16			; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+		BNE ISLRdo			; Is RIGHT active? Yes, do it
+		BEQ ILoop			; No, LEFT - Ignore
+
+IsRight:	LDA ACTIVE			; From LEFT to RIGHT
+		STA DEBUGRAM+17			; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+		BNE ILoop			; Is RIGHT active? Yes, Ignore
+
+ISLRdo:		LDA #4				; "D"
+		STA DEBUGRAM+15
+		JSR SwapActive
 		JMP IRefresh
 
 ;-------------- Perform HOME
 
-IsHome:		LDY #0				; First Entry
+IsHome:		LDY #1				; First Entry
 		STY DTOP			; Set TOP
-		INY
 		STY DSEL			; Set SELECTED
 		JSR DrawUI
 		JMP IRefresh
@@ -313,10 +337,11 @@ IsSpaceX:	TXA
 
 ;-------------- Perform Page DOWN
 
-IsPgDn:		CLC				;-- Check if END is less than PgDn
-		LDA DEND			; Directory END
-		SBC DBOT			; Subtract BOTTOM
-		CMP #DIRHEIGHT			; Is it more than height of display?
+IsPgDn:
+		CLC				;-- Check if END is less than PgDn
+		LDA DBOT			; Directory END
+		ADC #DIRHEIGHT-1		; Is it more than height of display?
+		CMP DBOT
 		BPL OkDown			; Yes, do it
 
 NoDown:		CLC				;-- Set TOP to be one page from BOT
@@ -326,12 +351,9 @@ NoDown:		CLC				;-- Set TOP to be one page from BOT
 		STA DSEL			; Put selected at TOP too
 		JMP IRefresh
 
-OkDown:		LDA DTOP			;-- Set TOP to be PgDn
-		ADC #DIRHEIGHT			; Add height of display
-		STA DTOP			; Set it
-		LDA DSEL			; Get SELECTED
-		ADC #DIRHEIGHT			; Add height of display
-		STA DSEL			; Set it
+OkDown:		LDA DBOT			; Get the BOTTOM visible entry
+		STA DTOP			; Make it the top
+		STA DSEL			; and SELECTED
 		JMP IRefresh
 
 ;-------------- Perform Page UP
@@ -340,7 +362,7 @@ IsPgUp:		CLC
 		LDA DTOP			; Directory TOP
 		CMP #DIRHEIGHT			; Height of display box
 		BPL IPUfull			; Is it more? Yes, jump full page
-		LDA #0				; No, just go to FIRST entry
+		LDA #1				; No, just go to FIRST entry
 		STA DTOP			; Set it
 		JMP IRefresh
 
@@ -351,38 +373,30 @@ IPUfull:	SBC #DIRHEIGHT			; Subtract height of display box
 		STA DSEL			; Save it
 		JMP IRefresh			; Re-draw list
 
-;-------------- Perform Select Directory LEFT/RIGHT
-
-IsSlash:
-;		JMP ILoop
-;		LDA ACTIVE			; Active Directory (0=LEFT,1=RIGHT)
-;		CMP #0				; Left Side?
-;		BNE RightAct			; No, Right is active
-
-LeftAct:	;backup current to left
-RightAct:	;backup current to right
-
-
 ;-------------- Perform Load new Drive/Unit
 
+IsSlash:
 IsCLS:		JSR AskDevice			; Ask and input Device#. Returns 8-15 in .A
 		BEQ CLSabort
 		STA DDEV			; Store Device#
 		JSR AskUnit			; Ask and input Unit#. Returns 0 or 1
 		STA DUNIT			; Store Unit#
-		JSR PrepCommon			; Get the new directory
+		JSR PrepDir			; Get the new directory
+		JMP IRefresh			; 
 CLSabort:	JMP ILoopStat			; Return and clear status line
 
 
 ;-------------- Perform RETURN
-
-IsRETURN:
-		LDY #19				; Index to FILETYPE Character
+; This will handle various actions based on filetype
+; P=PRG,D=DIR,C=CBM
+IsRETURN:	LDY #19				; Index to FILETYPE Character
 		LDA (DSELMEM),Y			; Get the FILETYPE		
 		CMP #80				; "P"? - PRG file
 		BEQ LoadPRG			; Yes, Load the file
 		CMP #67				; "D"? - DIR file
 		BEQ ChangeDIR			; Yes, Change Directory
+		CMP #66				; "C"? - CBM file (1581 and?)
+		BEQ SelPart			; Tes, Select Partition
 		JMP IRefresh
 
 ;-------------- Do File Load
@@ -417,111 +431,91 @@ LPpost:		LDY #11				; Post-filename string <QUOTE>,D0 ON U8<CR><CR>
 		STA $9E				; # of chrs in keyboard buffer
 		RTS				; Exit program
  	
-;-------------- Do Change Dir
+;-------------- TODO! Change Dir or Select Partition
+SelPart:
+ChangeDIR:	JMP IRefresh
 
-ChangeDIR:
+
+;======================================================================================
+; DIRECTORY MEMORY TRANSFER ROUTINES
+;======================================================================================
+
+;-- Swap Active
+
+SwapActive:	JSR SaveActive
+		LDA ACTIVE
+		EOR #1				; Toggle Active Bit
+		STA ACTIVE
+		JSR LoadActive
 		JMP IRefresh
 
-;======================================================================================
-; DEBUG TO SCREEN !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-;======================================================================================
-; Visible display of certain memory locations on screen
+;-- Save and Load Active
 
-DIRDEBUG:	LDY DTOP
-		STY DEBUGRAM+4
-		LDY DSEL
-		STY DEBUGRAM+5
-		LDY DBOT
-		STY DEBUGRAM+6
-		LDY DEND
-		STY DEBUGRAM+7
+SaveActive:
+		LDA #62				; ">"
+		STA DEBUGRAM+14
+		JSR GetCurrent			; Get Current Directory ZP mem to .A and .X
+		JSR SetSource
+		JSR GetActive			; Get Active Mem pointer to .A and .X
+		JSR SetDest
+		JSR XferIt			; Do the Transfter
 		RTS
 
-;======================================================================================
-; SetDZ: Set ZP3 Pointer Calculaion using DTOP
-;======================================================================================
-; DTOP is the INDEX to the top of the ACTIVE directory list. All display is relative
-; to this point. Rather than fiddle with adding or subtacting as you move up or down
-; the listing we will just re-calculate the ZP3 pointer each time.
-; DTOP is limited to one byte, so 256 maximum entries.
+LoadActive:
+		LDA #60				; "<"
+		STA DEBUGRAM+13
 
-SetDZ:		LDY DTOP			; Directory TOP. Counter for add loop
-		LDA DMEMHI			; HI Page for Directory Buffer
-		STA ZP3+1			; HI Work Pointer
-		LDA #2				; LO = $00 + 2
-		STA ZP3				; LO Work Pointer
-SetDZloop:	CPY #0				; Are we at top?
-		BEQ SetDZX			; Yes, done
-		CLC
-		ADC #DRECLEN			; Directory Record Length 
-		STA ZP3				; LO Work Pointer
-		BCC SDZskip			; no page crossing
-		INC ZP3+1			; HI Work Pointer
-SDZskip:	DEY				; 
-		BNE SetDZloop			; Loop back
-SetDZX:		RTS
-		
-
-;======================================================================================
-; PROMPT FOR DRIVE DEVICE NUMBER
-;======================================================================================
-; Prompt for Drive Device Number. Accepts 0-9 or STOP=Abort. 0-7 are treated as 10-17.
-
-AskDevice:	LDY #3					; Point to Prompt
-		JSR ClearKeyNM				; Print the message
-AskDloop	JSR AnyKey				; Get ANY Key
-		STA SCREEN_RAM+70			; DEBUG!!!!!!!!!!!!!!!!!!!		
-		CMP #3					; Is it Stop
-		BEQ AskAbort				; Yes, abort
-		CMP #48					; Is it "0"?
-		BMI AskDloop				; less, not valid
-		CMP #58					; "9"?
-		BPL AskDloop				; greater, not valid
-		CLC
-		CMP #55					; Is it "7"?
-		BPL NoAdj				; more, skip ahead
-		ADC #11					; less, Add 10 (0 to 7 -> 10 to 17)
-NoAdj:		SBC #48					; Subtract 48 - Device# in .A
-		STA SCREEN_RAM+71			; DEBUG!!!!!!!!!!!!!!!!!!!
-		RTS 
-
-;======================================================================================
-; PROMPT FOR DRIVE UNIT NUMBER
-;======================================================================================
-; Prompt for Drive Unit Number. Accepts 0-1 or STOP=Abort
-
-AskUnit:	LDY #4					; "Unit (0/1)?" Prompt
-		JSR ClearKeyNM				; Print the message
-AskUloop:	JSR AnyKey				; Get ANY Key
-		STA SCREEN_RAM+73
-		CMP #3					; Is it Stop?
-		BEQ AskAbort				; Yes, abort
-		CMP #48					; Is it "0"?
-		BEQ AskUok				; less, not valid
-		CMP #49					; "1"?
-		BNE AskUloop				; greater, not valid
-
-AskUok:		CLC
-		SBC #47					; Subtract 48 - Device# in .A
-		STA SCREEN_RAM+74
+		JSR GetCurrent			; Get Current Directory ZP mem to .A and .X
+		JSR SetDest
+		JSR GetActive			; Get Active Mem pointer to .A and .X
+		JSR SetSource
+		JSR XferIt
 		RTS
 
-AskAbort:	LDA #0					; Return a NULL
+;-- Get LEFT/RIGHT/CURRENT Memory Pointers
+
+GetCurrent:	LDA #<DMEMHI
+		LDX #0
 		RTS
 
-;======================================================================================
-; CONFIRM (Y/N) + AnyKey 
-;======================================================================================
-; Display confirmation then wait for ANY KEY - No validation done
-; Answer returned in .A
+GetActive:	LDA #1				; "A" DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+		STA DEBUGRAM+10
+		LDA ACTIVE
+		BNE GetRight
 
-AskQuit:	LDY #2					; "Quit?"
-		JSR ClearKeyNM				; Clear KEY Row, Print the Message
-AskSure:	LDY #13					; "Are you sure"
-		JSR PrintNM				; Print the Message
-AnyKey:		JSR GETIN				; Get keystroke to .A
-		BEQ AnyKey				; None, so loop back
+GetLeft:	LDA #12				; "L" DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+		STA DEBUGRAM+11
+		LDA #<LEFTMEM			; HI Location of LEFT storage memory
+		LDX #>LEFTMEM			; LO (never zero)
 		RTS
+
+GetRight:	LDA #18				; "R" DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+		STA DEBUGRAM+12
+		LDA #<RIGHTMEM			; HI Location of LEFT storage memory
+		LDX #>RIGHTMEM			; LO
+		RTS
+
+;-- Set Source or Destination
+
+SetSource:	STA ZP1
+		STX ZP1+1
+		RTS
+
+SetDest:	STA ZP2
+		STX ZP2+1
+		RTS
+
+;-- Transfer
+
+XferIt:		LDY #0				; Number of bytes to transfer
+XferLloop:	LDA (ZP1),Y			; Read it
+		STA (ZP2),Y			; Write it
+		INY				; Next byte
+		CPY #10				; Are we at the end?
+		BNE XferLloop			; No, go back for more
+		RTS
+
+
 
 ;======================================================================================
 ; SETUP FOR LEFT/RIGHT DIRECTORY
@@ -533,49 +527,38 @@ ShowActiveDir:
 		BNE ShowDirectory		; No, ok
 		RTS				; Yes, nothing to show
 
-;ShowLeftDir:	LDA LDMEMHI			; HI Pointer to LEFT Directory Buffer
-;		JSR SetDirMem			; Set Memory Pointers
-;		LDA #DIRCOL0			; LEFT directory column
-;		LDY LDEND			; Index of LEFT last entry
-;		JMP ShowTest
-;
-;ShowRightDir:	LDA RDMEMHI			; HI Pointer to LEFT Directory Buffer
-;		JSR SetDirMem			; Set Memory Pointers
-;		LDA #DIRCOL1			; LEFT directory column
-;		LDY RDEND			; Index of LEFT last entry
-;
-;ShowTest:	STA DCOL			; Directory Column
-;		STY DEND			; Index of last entry
-;		CPY #0				; Is DEND zero?
-;		BNE ShowDirectory		; No, good to go
-;		RTS				; Yes, nothing to show!
-;
-;SetDirMem:	STA DMEMHI			; HI Top Index Memory Pointer
-;		STA ZP3+1			; HI Work Pointer
-;		LDA #2				; LO starts at 2
-;		STA ZP3				; LO Work Pointer
-;		RTS
+;======================================================================================
+; SET DIRECTORY MEMORY POINTER 
+;======================================================================================
+; Sets ZP3 pointer to start of active Directory buffer + 2
+; (to skip drive and blocks used bytes to make traversing easier
+
+SetDirPtr:	LDA DMEMHI			; HI Top Index Memory Pointer
+		STA ZP3+1			; HI Work Pointer
+		LDA #2				; LO starts at 2
+		STA ZP3				; LO Work Pointer
+		RTS
 
 
 ;======================================================================================
 ; SHOW DIRECTORY
 ;======================================================================================
 ; ZP3 pointer used to walk through directory memory. 
-; Requires DTOP, DEND, DSEL to be set. When bottom is reached it is saved to DBOT. 
+; Requires DTOP, DEND, DSEL to be set. When bottom is reached it is saved to DBOT.
+; DTOP is the entry at the top of the list, just below the HEADER. DTOP>0!
+; DENTRY points to current entry being looked at.
+; DSEL is the enry that is SELECTED. 
 
-ShowDirectory:	JSR SetDZ			; Set ZP3 pointer based on DTOP
-		JSR DIRDEBUG			; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-		LDY DTOP			; Top Entry
-		STY DENTRY			; Make it Current Entry
+ShowDirectory:  JSR SetDirPtr			; Always start at HEADER!		
+		LDY #0				; Top Entry (HEADER)
+		STY DENTRY			; Point to Header
 		STY DBOT			; BOTTOM Index
-		LDY #0				; Count=1 (first entry displayed)
-		STY DCOUNT			; Entry Counter
-;		STY DEND			; END Index
+		STY DCOUNT			; Entry Counter (0 to end)
 
-;-------------- Position Cursor
+;-------------- TOP of Loop to Draw Entries
+; Position Cursor to top of directory Area
 
-SDLoop:		LDA DROW			; Cursor Position for Top Left
+SDloop:		LDA DROW			; Cursor Position for Top Left
 		CLC
 		ADC DCOUNT			; Add Entry Count
 		TAX
@@ -598,11 +581,11 @@ SDSelection:	LDA #32				; Assume <SPACE> character
 		STA DSELMEM+1			; HI SELECTED memory pointer
 
 		LDA #62				; Yes, use ">" character
-SDpoint:	JSR PRINT			; Print It!
+SDpoint:	JSR PRINT			; Print either SPACE or ">"
 
 ;-------------- Check if Entry is Marked
 
-		LDY #18				; Offset for in entry for Marker
+		LDY #18				; Offset in record for Marker
 		LDA (ZP3),Y			; Get the byte
 		CMP #95				; Is it <BACKARROW>?
 		BNE NotMarked			; No, skip ahead
@@ -620,9 +603,24 @@ SDprint:	LDA (ZP3),Y			; Get character at pointer
 		INY				; next character
 		BNE SDprint			; Jump back for more
 
+;-------------- Finished Entry. Check if HEADER entry
+
+SDpos:		LDA DCOUNT			; Entry. Is it zero (HEADER)?
+		BNE SDpos2			; No, skip ahead to next entry
+
+;-------------- Calculate pointer for first normal file entry
+; The HEADER is the first entry in the buffer, when we scoll down we want this to
+; always be visible. We may have to skip over some entries so that the DTOP entry
+; is directly below the HEADER.
+
+		LDY DTOP			; Yes, set Top Entry
+		STY DENTRY			; Make it Current Entry
+		JSR SetDZ			; Set ZP3 pointer based on DTOP
+		jmp SDnext2			; skip past DENTRY increment
+
 ;-------------- Move Work Pointer to next entry
 
-SDpos:		LDA ZP3				; LO Work Pointer
+SDpos2:		LDA ZP3				; LO Work Pointer
 		CLC				; prep for Add
 		ADC #DRECLEN			; Add record len to pointer
 		STA ZP3				; LO Work Pointer
@@ -630,14 +628,19 @@ SDpos:		LDA ZP3				; LO Work Pointer
 		INC ZP3+1			; Yes, inc page.
 
 SDnext:		INC DENTRY			; Next Entry
-		INC DBOT			; Update BOTTOM
-		INC DCOUNT			; Increment Count
-		LDA DCOUNT			; Get it again		
-		CMP #DIRHEIGHT			; Is it at end of box?
+SDnext2:	LDA DCOUNT			; Get it again		
+		CMP #DIRHEIGHT			; Is it at end of allocated area?
 		BEQ SDexit			; Yes, exit		
 		CMP DEND			; Is it at the end of the directory?
-		BNE SDLoop			; No, Go back for another entry
-SDexit:		DEC DBOT			; adjust
+		BEQ SDexit			; Yes, Exit
+
+		INC DCOUNT			; Increment Count
+		JMP SDloop			; Go back for another entry
+
+SDexit:		LDA DENTRY			; Last ENTRY 
+		STA DBOT			; save it for DBOT
+		DEC DBOT			; adjust
+		JSR GetDiskStatus		; Show Disk Status
 		RTS
 
 
@@ -711,9 +714,9 @@ SENDCMDDONE	JSR UNLSN			; un-listen
 ; GET DISK STATUS
 ;======================================================================================
 ; Read the status string: ##,String,TT,SS
+; Print to STATUS line
 
-GetDiskStatus:
-		LDX #DSROW			; Disk Status ROW
+GetDiskStatus:	LDX #DSROW			; Disk Status ROW
 		JSR CursorR			; Set the cursor to start of Row
 
 		LDA DDEV			; Current Device#
@@ -735,46 +738,21 @@ GS_DONE		JSR UNTLK			; UNTALK
 ;======================================================================================
 ; PREP ACTIVE DIRECTORY
 ;======================================================================================
-; Set up Active directory
-; Set ACTIVE to 0 (LEFT) or 1 (RIGHT)
+; Set up Active directory. Set ACTIVE to 0 (LEFT) or 1 (RIGHT)
 
-PrepDir:	LDY ACTIVE			; Get Active directory
+PrepDir:
+		LDY ACTIVE			; Get Active directory
 		BNE Prep1
 
-Prep0:
-		LDA LDMEMHI			; HI Pointer to Directory Storage Address
-		STA DMEMHI			;
-;		LDA LDDEV			; Device#
-;		STA DDEV
-;		LDA LDUNIT			; Unit#
-;		STA DUNIT				
-
-		JMP PrepCommon
+Prep0:		LDA LDMEMHI			; HI Pointer to Directory Storage Address
+		BNE PrepCommon
 
 Prep1:		LDA RDMEMHI			; HI Pointer to Directory Storage Address
-		STA DMEMHI			; HI
-		LDA RDDEV			; Device#
-		STA DDEV
-		LDA RDUNIT			; Unit#
-		STA DUNIT				
 
-PrepCommon:	LDA DUNIT			; Get the UNIT
-		BNE SetU1			; If not zero, skip ahead
+PrepCommon:	STA DMEMHI
+		BNE LoadDirectory		; If Device>0 then ok
 
-SetU0:		LDA #<FNDir0			; LO Pointer to Filename ("$0")
-		STA FNADR			; LO Filename Address pointer
-		LDA #>FNDir0			; HI
-		STA FNADR+1			; HI 
-		JMP PrepDev
-
-SetU1:		LDA #<FNDir1			; LO Pointer to Filename ("$1")
-		STA FNADR			; LO Filename Address pointer
-		LDA #>FNDir1			; HI
-		STA FNADR+1			; HI 
-
-PrepDev:	LDA DDEV			; LEFT Device#
-		STA FA				; Set Device Number
-CheckValDir:	BNE LoadDirectory		; If Device>0 then ok
+;-------------- Device not set
 
 		LDY #16				; no device! tell them
 		JSR ClearMsgNM			; print it
@@ -788,37 +766,52 @@ CheckValDir:	BNE LoadDirectory		; If Device>0 then ok
 ; FNLEN must be set to length of string.-----------> To be fixed
 ; Counts # of directory entries to DCOUNT.
 
-;-------------- Prep
-LoadDirectory:
+LoadDirectory:	LDA DUNIT			; Get the UNIT
+		BNE SetD1			; If not zero, skip ahead
+
+SetD0:		LDA #<FNDir0			; LO Pointer to Filename ("$0")		
+		LDY #>FNDir0			; HI
+		BNE PrepDev
+
+SetD1:		LDA #<FNDir1			; LO Pointer to Filename ("$1")
+		LDY #>FNDir1			; HI
+
+PrepDev:	STA FNADR			; LO Filename Address pointer
+		STY FNADR+1			; HI 
+
+		LDY #2				; Directory string Length=2 "$0" or "$1"
+		STY FNLEN			; Save it
+
+		LDA DDEV			; LEFT Device#
+		STA FA				; Set Device Number
+
 		LDA DMEMHI			; HI Start of Directory buffer
 		STA ZP1+1
 		LDA #0				; Clear pointers
 		STA ZP1				; LO Work Pointer
+
 		STA DTOP			; Index of TOP entry
 		STA DBOT			; Index of BOTTOMentry		
 		STA DEND			; Index of END Entry
 		STA DCOUNT			; Counter for directory display
-		LDA #1				; Make entry after header SELECTED
-		STA DSEL			; Index of Selected Entry
   
 		LDY #6				; Print "Reading.."
 		JSR ClearKeyNM
 
-		LDY #2				; Length=2 "$0" or "$1" DEBUG!!!!!!!!!!!!!
-		STY FNLEN			; Save it
-
-		LDA #0				; Clear the status byte
-		STA STATUS
+		LDA #0				; 
+		STA STATUS			; Clear Disk Status
 		STA DCOUNT			; Zero the entry counter
 
 		LDA #$60			; DATA SA 0
-		STA SA
+		STA SA				; Set Secondary Address
 		JSR OPENI			; open file
 		JSR TALK			; talk
 		LDA SA				; Secondary Address
 		JSR SECND			; Set Secondary Address
 		LDX STATUS
+		STX SCREEN_RAM+50		; DEBUG!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 		BNE LDError
+
 SkipLA:		JSR ACPTR			; Read two bytes Load Address
 		JSR ACPTR			; and discard
 
@@ -888,23 +881,25 @@ Entry_done:	LDA DCOUNT			; Get Counter
 ;-------------- Disk Error
 
 LDError:	JSR CLSEI			; close file with $E0, unlisten
-		JSR $E015			; Clear screen
-		JSR GetDiskStatus		; Show error
 		LDA #0
 		STA DCOUNT
 		STA DEND
-		JSR AnyKey
 		RTS
 
 ;-------------- Listing is complete
 
 
 StopListing:	JSR CLSEI			; close file with $E0, unlisten
+		DEC DEND			; don't count "blocks free" entry
 		LDY #5				; "entries:"
 		JSR ClearMsgNM			; Print to Message line
 		LDA #0				; HI # of entries = 0
 		LDY DCOUNT			; LO count
+		DEY				; Adjust for blocks free line
 		JSR INTOUT			; write #blocks to screen
+		LDY #1				; First filename (ie: skip header)
+		STY DTOP			; Top of listing
+		STY DSEL			; Select it
 		RTS
 
 
@@ -1002,6 +997,102 @@ InitDirMem:	LDX STREND+1			; HI End of Arrays
 		STA RDROW
 		LDA #DIRCOL1
 		STA RDCOL
+		LDA #9				; Set default to 9;0
+		STA RDDEV
+		LDA #1
+		STA RDUNIT
+		RTS
+
+
+;======================================================================================
+; SetDZ: Set ZP3 Pointer Calculaion using DTOP
+;======================================================================================
+; DTOP is the INDEX to the top of the ACTIVE directory list. All display is relative
+; to this point. Rather than fiddle with adding or subtacting as you move up or down
+; the listing we will just re-calculate the ZP3 pointer each time.
+; DTOP is limited to one byte, so 256 maximum entries.
+
+SetDZ:		
+		LDA DMEMHI			; HI Page for Directory Buffer
+		STA ZP3+1			; HI Work Pointer
+		LDA #2				; LO = $00 + 2
+		STA ZP3				; LO Work Pointer
+		LDY DTOP			; Validate DTOP
+		BNE SetDZTop			; >0 is ok
+		INC DTOP			; If not, INCREMENT
+
+SetDZTop:	LDY #0				; Counter for add loop
+SetDZloop:	CPY DTOP			; Is counter at DTOP?
+		BEQ SetDZX			; Yes, done
+		CLC
+		ADC #DRECLEN			; Directory Record Length 
+		STA ZP3				; LO Work Pointer
+		BCC SDZskip			; no page crossing
+		INC ZP3+1			; HI Work Pointer
+SDZskip:	INY				; increment counter
+		BNE SetDZloop			; always Loop back
+SetDZX:		RTS
+
+
+;======================================================================================
+; CONFIRM (Y/N) + Quit + AnyKey 
+;======================================================================================
+; Display confirmation then wait for ANY KEY - No validation done
+; Answer returned in .A
+
+AskQuit:	LDY #2					; "Quit?"
+		JSR ClearKeyNM				; Clear KEY Row, Print the Message
+AskSure:	LDY #13					; "Are you sure"
+		JSR PrintNM				; Print the Message
+AnyKey:		JSR GETIN				; Get keystroke to .A
+		BEQ AnyKey				; None, so loop back
+		RTS
+
+;======================================================================================
+; PROMPT FOR DRIVE DEVICE NUMBER
+;======================================================================================
+; Prompt for Drive Device Number. Accepts 0-9 or STOP=Abort. 0-7 are treated as 10-17.
+
+AskDevice:	LDY #3					; Point to Prompt
+		JSR ClearKeyNM				; Print the message
+AskDloop	JSR AnyKey				; Get ANY Key
+		STA SCREEN_RAM+70			; DEBUG!!!!!!!!!!!!!!!!!!!		
+		CMP #3					; Is it Stop
+		BEQ AskAbort				; Yes, abort
+		CMP #48					; Is it "0"?
+		BMI AskDloop				; less, not valid
+		CMP #58					; "9"?
+		BPL AskDloop				; greater, not valid
+		CLC
+		CMP #55					; Is it "7"?
+		BPL NoAdj				; more, skip ahead
+		ADC #11					; less, Add 10 (0 to 7 -> 10 to 17)
+NoAdj:		SBC #48					; Subtract 48 - Device# in .A
+		STA SCREEN_RAM+71			; DEBUG!!!!!!!!!!!!!!!!!!!
+		RTS 
+
+;======================================================================================
+; PROMPT FOR DRIVE UNIT NUMBER
+;======================================================================================
+; Prompt for Drive Unit Number. Accepts 0-1 or STOP=Abort
+
+AskUnit:	LDY #4					; "Unit (0/1)?" Prompt
+		JSR ClearKeyNM				; Print the message
+AskUloop:	JSR AnyKey				; Get ANY Key
+		STA SCREEN_RAM+73
+		CMP #3					; Is it Stop?
+		BEQ AskAbort				; Yes, abort
+		CMP #48					; Is it "0"?
+		BEQ AskUok				; less, not valid
+		CMP #49					; "1"?
+		BNE AskUloop				; greater, not valid
+
+AskUok:		CLC
+		SBC #47					; Subtract 48 - Device# in .A
+		STA SCREEN_RAM+74
+		RTS
+
+AskAbort:	LDA #0					; Return a NULL
 		RTS
 
 ;======================================================================================
@@ -1029,7 +1120,7 @@ SaveScreen:	LDA #>SCREEN_RAM		; HI Screen address
 		LDY SCNMEMHI			; HI Screen Save Buffer
 		BNE CopyScreen			; Setup for copy, then do it
 
-RestoreScreen:	LDY #>SCREEN_RAM		; HI Screen address
+RestScreen:	LDY #>SCREEN_RAM		; HI Screen address
 		LDA SCNMEMHI			; HI Screen Save Buffer
 		;JMP CopyScreen			; falls into the routine
 
@@ -1080,8 +1171,7 @@ SaveCursorPos:	LDA ScrPtr			; Pointer to screen line
 		STA SCNSAVE4
 		RTS
 
-RestoreCursorPos:
-		LDA SCNSAVE1
+RestCursorPos:	LDA SCNSAVE1
 		STA ScrPtr
 		LDA SCNSAVE2
 		STA ScrPtr+1
@@ -1223,19 +1313,17 @@ NM9:	!PET "load prg: ",0				; Load prompt
 NM10:	!PET 147,"dL",0					; <CLS>dL<QUOTE> - Pre-filename
 NM11:	!PET ",d0,u8",0					; d0,u8          - Post-filename
 
-NM12:	!PET RVS,"cls"   ,ROFF,"drive "			; Select Drive
-	!PET RVS,"/"     ,ROFF,"switch "		; Switch Sides
-	!PET RVS,"crsr"  ,ROFF,"sel "			; Cursor
-	!PET RVS,"home"  ,ROFF,"top "			; Home
-	!PET RVS,"<>"    ,ROFF,"page "			; Page Up/Down
-	!PET RVS,"spc"   ,ROFF,"mark "			; Space
-	!PET RVS,"rtn"   ,ROFF,"run/cd "		; Return
-	!PET RVS,"q"     ,ROFF,"quit",0	; Quit
+NM12:	!PET RVS,"/"	,ROFF,"drive "			; Select Drive	
+	!PET RVS,"home" ,ROFF,"top "			; Home
+	!PET RVS,"[]"   ,ROFF,"page "			; Page Up/Down
+	!PET RVS,"spc"  ,ROFF,"mark "			; Space
+	!PET RVS,"rtn"  ,ROFF,"run/cd "			; Return
+	!PET RVS,"q"    ,ROFF,"quit",0			; Quit
 
 NM13:	!PET "are you sure (y/n)?",0			; Are you Sure?
-NM14:	!PET "stevebrowse 2021-04-17",0 		; Title text
+NM14:	!PET "stevebrowse 2021-04-18",0 		; Title text
 NM15:   !PET "dev:xx unit:x ",0				; Device# and Unit# display
-NM16:	!PET "no drive selected. press <cls>!",0	;
+NM16:	!PET "no drive selected. press '/'!",0	;
 
 ;======================================================================================
 ; SCREEN LINE ADDRESS TABLE
