@@ -27,8 +27,8 @@ BACKACTION	= 0
 SCREENPAGES     = 8				; 2K size for 80 col
 DIRWIDTH        = 16				; Width of directory window
 DIRHEIGHT	= 18				; Height of directory window
-DIRROW		= 2				; Row for first directory line
-DIRCOL		= 2				; Column for directory listing
+DIRROW		= 1				; Row for first directory line
+DIRCOL		= 1				; Column for directory listing
 IDFLAG		= 0				; Flag to add ID string
 MYDRIVE		= 8				; Default Drive Number, ie: 8
 DRIVEUNIT	= 0				; Default Unit Numberm ie: 0 or 1
@@ -44,6 +44,8 @@ STATUSROW	= 23				; Location of status row
 ;		= $c5				; HI Pointer to character screen line
 ;CursorCol	= $c6				; Cursor COL - Position of cursor on above line
 ;CursorRow	= $d8				; Cursor ROW
+;STROUTZ	= $bb1d				; A=LSB, Y=MSB			; BASIC4 STROUTZ is broken!
+;STROUT		= $bb24				; X=len, STRADR=ptr
 
 
 SCNMEM		= $B1				; LO Screen Save Buffer Pointer
@@ -62,7 +64,7 @@ DSEL		= $BE				; Index of Selected Entry
 DEND		= $BF				; Index of Last Entry
 DCOUNT		= $C0				; Counter for directory display
 DENTRY		= $C1				; Index of current Entry
-;last free	= $C2				; Last free
+DTMPY		= $C2				; Last free
 
 ;-- $ED-$F7 not used in 80-column machines. Safe to use here for now?
 
@@ -147,13 +149,11 @@ InitStuff:	LDX #0				; Make our data start on page boundry
 
 
 ;======================================================================================
-; SHOW DIRECTORY
+; SETUP FOR LEFT DIRECTORY
 ;======================================================================================
 ; Displays the directory in the proper location
 
-ShowLeftDir:
-						; DEBUG************
-		LDY LDIRMEM			; LO Pointer to LEFT Directory Buffer
+ShowLeftDir:	LDY LDIRMEM			; LO Pointer to LEFT Directory Buffer
 		STY DMEM			; LO Pointer for Dir Memory
 		INY				; Add 2 to skip block bytes
 		INY
@@ -162,49 +162,53 @@ ShowLeftDir:
 		STY DMEM+1			; HI Pointer for Dir Memory
 		STY ZP3+1			; HI Work Pointer
 
-		LDY DTOP			; Top Entry
+;======================================================================================
+; SHOW DIRECTORY
+;======================================================================================
+
+ShowDirectory:	LDY DTOP			; Top Entry
 		STY DENTRY			; Make it Current Entry
 		LDY LDIREND
 		STY DEND
-
-		LDY #0				; Count=1 (first entry displayed)
+		CPY #0				; Is DEND zero?
+		BNE SDgo			; No, good to go
+		RTS				; Yes, nothing to show!
+SDgo:		LDY #0				; Count=1 (first entry displayed)
 		STY DCOUNT			; Entry Counter
 
-SDLoop:
-		INC DCOUNT
-		LDA DCOUNT			
-		STA SCREEN_RAM			; DEBUG
-		
 ;-------------- Position Cursor
-		LDA #DIRROW			; Cursor Position for Top Left
+
+SDLoop:		LDA #DIRROW			; Cursor Position for Top Left
 		CLC
 		ADC DCOUNT			; Add Entry Count
 		LDY #DIRCOL
 		JSR CursorAt			; Move cursor to top of directory
 
 ;-------------- Print the entry
-		ldy #0
-		lda #'!'
-		sta (ZP3),Y
-		LDA ZP3				; LO Work Pointer
-		LDY ZP3+1			; HI Work Pointer
-		JSR STROUTZ			; Print it, starting at <QUOTE>
 
-SDnext:		LDA ZP3
-		CLC
+		LDY #0				; Index for print loop
+		STY ReverseFlag			; also, set <RVS> off
+
+SDprint:	LDA (ZP3),Y			; Get character at pointer
+		CMP #0				; Is it <NULL>?
+		BEQ SDnext			; Yes, we are done
+		JSR $FFD2			; No, print it!
+		INY				; next character
+		BNE SDprint			; Jump back for more
+
+SDnext:		LDA ZP3				; LO Work Pointer
+		CLC				; prep for Add
 		ADC #DRECLEN			; Add record len to pointer
-		STA ZP3				; 
+		STA ZP3				; LO Work Pointer
 		BNE SDNext			; Did it cross page? No skip ahead
 		INC ZP3+1			; Yes, inc page.
 
-SDNext:		LDA DCOUNT			; Get it again
+SDNext:		INC DCOUNT			; Next Entry#
+		LDA DCOUNT			; Get it again
 		CMP #DIRHEIGHT			; Is it at end of box?
 		BEQ SDexit
 		CMP DEND			; Is it at the end of the directory
-		BNE SDLoop			; No, Go back for more
-
-		JSR ClearStatus
-	
+		BNE SDLoop			; No, Go back for another entry
 SDexit:		RTS
 
 
@@ -688,7 +692,7 @@ DUIBar:		LDA #<KeyBar
 
 ;-------------- User Interface
 
-TitleBar:	!PET 147,18,"stevebrowse 2021-04-07                  ",13,0	; Top Line Titlebar
+TitleBar:	!PET 147,18,"stevebrowse 2021-04-08",13,0	; Top Line Titlebar
 DirBox1:	!BYTE $B0					; Top Left Corner
 		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
 		!BYTE $C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0,$C0	; Hor Line
